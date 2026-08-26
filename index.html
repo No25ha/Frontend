@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DailyFlow</title>
+
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script src="/config.js"></script>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div x-data="{
+    selected: null,
+    editing: null,
+    addModalOpen: false,
+    timeEntryModalOpen: false,
+    timeEntryTask: null,
+
+    async submitAddTask(form) {
+      const response = await fetch(window.API_BASE + '/api/tasks', {
+        method: 'POST',
+        headers: { 'HX-Request': 'true' },
+        body: new FormData(form)
+      });
+      const html = await response.text();
+      document.querySelector('#tasks').insertAdjacentHTML('beforeend', html);
+      form.reset();
+      this.addModalOpen = false;
+      this.$dispatch('task-added');
+    },
+
+    async submitEditTask(form) {
+      const response = await fetch(window.API_BASE + '/api/tasks/' + this.editing.id, {
+        method: 'PUT',
+        headers: { 'HX-Request': 'true' },
+        body: new FormData(form)
+      });
+      const html = await response.text();
+      document.querySelector('#tasks').insertAdjacentHTML('beforeend', html);
+      form.reset();
+      this.editing = null;
+      this.$dispatch('task-added');
+    },
+
+    onProjectClick(e) {
+      const card = e.target.closest('.project-card');
+      if (!card) return;
+      this.selected = { id: card.dataset.id, name: card.dataset.name, state: card.dataset.state };
+      this.$nextTick(() => this.loadTasks());
+    },
+
+    loadTasks() {
+      const url = `/api/tasks?filters[project][documentId][$eq]=${this.selected.id}&sort=createdAt:desc`;
+      htmx.ajax('GET', url, { target: '#tasks', swap: 'innerHTML' });
+    },
+
+    async submitTimeEntry(form) {
+      const response = await fetch(window.API_BASE + '/api/time-entries', {
+        method: 'POST',
+        headers: { 'HX-Request': 'true' },
+        body: new FormData(form)
+      });
+      const html = await response.text();
+      form.reset();
+      this.timeEntryModalOpen = false;
+      this.timeEntryTask = null;
+      this.loadTasks();
+    },
+
+    onTaskClick(e) {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const card = e.target.closest('.task-card');
+      const id = card.dataset.id;
+
+      if (btn.dataset.action === 'add-time-entry') {
+        this.timeEntryTask = { id, title: card.dataset.title };
+        this.timeEntryModalOpen = true;
+      } else if (btn.dataset.action === 'delete-task') {
+        if (!confirm('Delete this task?')) return;
+        htmx.ajax('DELETE', `/api/tasks/${id}`, { swap: 'outerHTML' })
+          .then(() => this.$dispatch('task-deleted'));
+      } else if (btn.dataset.action === 'edit-task') {
+        this.editing = {
+          id,
+          title: card.dataset.title,
+          priority: card.dataset.priority,
+          state: card.dataset.state,
+        };
+      }
+    },
+
+    refresh() {
+      this.loadTasks();
+      htmx.ajax('GET', '/api/projects', { target: '#projects', swap: 'innerHTML' });
+    },
+  }" @task-added.window="refresh()" @task-deleted.window="refresh()">
+    <header>
+      <h1>DailyFlow</h1>
+      <p class="subtitle">Strapi returns plain HTML · HTMX loads it · Alpine drives the UI</p>
+    </header>
+
+    <div class="layout">
+      <!-- MASTER: projects — HTMX loads the plain cards; Alpine handles the click -->
+      <aside class="panel">
+        <div class="section-head"><h2>Projects</h2></div>
+        <div id="projects" class="project-list"
+             hx-get="/api/projects" hx-trigger="load"
+             @click="onProjectClick($event)">…</div>
+      </aside>
+
+      <!-- DETAIL: fully Alpine-driven from the selected project -->
+      <main class="panel">
+        <template x-if="!selected">
+          <p class="empty placeholder">← Select a project to see its tasks.</p>
+        </template>
+
+        <template x-if="selected">
+          <div>
+            <header class="detail__head">
+              <h2 class="detail__title" x-text="selected.name"></h2>
+              <span class="badge" :class="'state--' + selected.state" x-text="selected.state"></span>
+              <button type="button" class="btn-icon" @click="addModalOpen = true" title="Add task">➕</button>
+            </header>
+
+            <!-- tasks — HTMX loads the plain cards; Alpine handles edit/delete clicks -->
+            <div id="tasks" class="task-list" @click="onTaskClick($event)">…</div>
+          </div>
+        </template>
+      </main>
+    </div>
+
+    <!-- add task modal -->
+    <template x-if="addModalOpen">
+      <div class="modal" @click.self="addModalOpen = false">
+        <form class="task-edit"
+              @submit="submitAddTask">
+          <h3>New task</h3>
+          <input type="text" name="title" class="form-control" placeholder="Task title…" required />
+          <div class="task-edit__row">
+            <select name="priority" class="form-select">
+              <option value="low">low</option>
+              <option value="high">high</option>
+            </select>
+            <select name="state" class="form-select">
+              <option value="pending">pending</option>
+              <option value="active">active</option>
+              <option value="paused">paused</option>
+              <option value="completed">completed</option>
+            </select>
+          </div>
+          <input type="hidden" name="project" :value="selected.id" />
+          <div class="task-edit__actions">
+            <button type="button" @click="submitAddTask($el.closest('form'))">Add</button>
+            <button type="button" class="btn-ghost" @click="addModalOpen = false">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </template>
+
+    <!-- add time entry modal -->
+    <template x-if="timeEntryModalOpen">
+      <div class="modal" @click.self="timeEntryModalOpen = false">
+        <form class="task-edit" @submit.prevent="submitTimeEntry($el)">
+          <h3>New time entry for <span x-text="timeEntryTask?.title"></span></h3>
+          <input type="datetime-local" name="startedAt" class="form-control" required />
+          <input type="datetime-local" name="stoppedAt" class="form-control" required />
+          <input type="hidden" name="task" :value="timeEntryTask?.id" />
+          <div class="task-edit__actions">
+            <button type="submit">Add</button>
+            <button type="button" class="btn-ghost" @click="timeEntryModalOpen = false">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </template>
+
+    <!-- edit task modal -->
+    <template x-if="editing">
+      <div class="modal" @click.self="editing = null">
+        <form class="task-edit"
+              @submit="submitEditTask">
+          <h3>Edit task</h3>
+          <input type="text" name="title" class="form-control" :value="editing.title" required />
+          <div class="task-edit__row">
+            <select name="priority" class="form-select" :value="editing.priority">
+              <option value="low">low</option>
+              <option value="high">high</option>
+            </select>
+            <select name="state" class="form-select" :value="editing.state">
+              <option value="pending">pending</option>
+              <option value="active">active</option>
+              <option value="paused">paused</option>
+              <option value="completed">completed</option>
+            </select>
+          </div>
+          <div class="task-edit__actions">
+            <button type="button" @click="submitEditTask($el.closest('form'))">Save</button>
+            <button type="button" class="btn-ghost" @click="editing = null">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </template>
+  </div>
+</body>
+</html>
