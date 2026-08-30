@@ -1,6 +1,6 @@
 // Central place for the backend base URL.
 // Change this one line when you deploy (e.g. https://api.dailyflow.com).
-window.API_BASE = 'http://localhost:1337';
+window.API_BASE = 'http://127.0.0.1:1337';
 
 // HTMX 2 blocks cross-origin requests by default (selfRequestsOnly).
 // Since our frontend and backend are on different origins, we must opt in.
@@ -22,4 +22,19 @@ document.addEventListener('htmx:configRequest', (e) => {
   if (path.startsWith('/')) {
     e.detail.path = window.API_BASE + path;
   }
+});
+
+// A 204 No Content response normally tells HTMX to skip the swap.
+// For DELETE requests we still want the swap so the element is removed.
+document.addEventListener('htmx:beforeSwap', (e) => {
+  if (e.detail.xhr.status === 204) {
+    e.detail.shouldSwap = true;
+    e.detail.isError = false;
+  }
+});
+
+// Let Alpine process directives (@click, x-data, etc.) on content
+// that HTMX swaps into the page.
+document.addEventListener('htmx:afterSettle', (e) => {
+  if (window.Alpine) Alpine.initTree(e.detail.target);
 });
