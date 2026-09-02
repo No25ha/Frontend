@@ -9,8 +9,18 @@
     <script defer src="/config.js"></script>
     <link rel="stylesheet" href="/app.css" />
 </head>
-<body x-data="{ selected: null, editing: null, addModalOpen: false, timeEntryModalOpen: false, timeEntryTask: null }"
+<body x-data="{
+        selected: null,
+        editing: null,
+        addModalOpen: false,
+        timeEntryModalOpen: false,
+        timeEntryTask: null,
+        projectModalOpen: false,
+        projectForm: { name: '', description: '', state: 'active' },
+        projectEditing: null
+    }"
       @open-edit="editing = $event.detail"
+      @open-project-edit="projectEditing = $event.detail; projectForm = { name: $event.detail.name || '', description: $event.detail.description || '', state: $event.detail.state || 'active' }; projectModalOpen = true"
       @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
       @refresh-tasks="$nextTick(() => { if(selected) $el.querySelector('.project-card[data-id=\'' + selected.id + '\']')?.click() })">
     <div>
@@ -22,8 +32,9 @@
         </header>
         <div class="layout">
             <aside class="panel">
-                <div class="section-head">
+                <div class="section-head section-head--projects">
                     <h2>Projects</h2>
+                    <button type="button" class="btn-icon" @click="projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
                 </div>
                 <div id="projects" class="project-list" hx-get="/api/projects"
                     hx-trigger="load" hx-target="#projects" hx-swap="innerHTML">
@@ -47,12 +58,70 @@
             </main>
         </div>
 
+        <!-- Project Modal -->
+        <template x-if="projectModalOpen">
+            <div class="modal" @click.self="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">
+                <template x-if="projectEditing">
+                    <form class="task-edit"
+                          :hx-put="'/api/projects/' + projectEditing.id"
+                          hx-target="#projects"
+                          hx-swap="innerHTML"
+                          x-init="htmx.process($el)"
+                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset()">
+                        <h3>Edit project</h3>
+                        <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
+                        <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
+                        <select name="state" class="form-select" x-model="projectForm.state">
+                            <option value="active">active</option>
+                            <option value="archived">archived</option>
+                        </select>
+                        <div class="task-edit__actions">
+                            <button type="submit">Save</button>
+                            <button type="button" class="btn-ghost" @click="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">Cancel</button>
+                        </div>
+                    </form>
+                </template>
+
+                <template x-if="!projectEditing">
+                    <form class="task-edit"
+                          hx-post="/api/projects"
+                          hx-target="#projects"
+                          hx-swap="innerHTML"
+                          x-init="htmx.process($el)"
+                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset()">
+                        <h3>New project</h3>
+                        <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
+                        <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
+                        <select name="state" class="form-select" x-model="projectForm.state">
+                            <option value="active">active</option>
+                            <option value="archived">archived</option>
+                        </select>
+                        <div class="task-edit__actions">
+                            <button type="submit">Add</button>
+                            <button type="button" class="btn-ghost" @click="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">Cancel</button>
+                        </div>
+                    </form>
+                </template>
+            </div>
+        </template>
+
         <!-- Add Task Modal -->
         <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
-            <form class="task-edit" hx-post="/api/tasks" hx-target="#tasks" hx-swap="beforeend"
+            <form class="task-edit" hx-post="/api/tasks/from-url" hx-target="#tasks" hx-swap="beforeend"
                   @htmx:after-request="addModalOpen = false; $el.reset()">
                 <h3>New task</h3>
-                <input type="text" name="title" class="form-control" placeholder="Task title..." required />
+
+                <label class="url-import__label">Import from URL (optional)</label>
+                <input type="url" name="url" class="form-control"
+                       placeholder="https://example.com/projects/ecommerce/tasks/fix-login"
+                       hx-post="/api/tasks/parse-url"
+                       hx-trigger="input changed delay:400ms"
+                       hx-target="#url-preview"
+                       hx-swap="innerHTML" />
+                <div id="url-preview"></div>
+
+                <input id="field-projectName" type="text" name="projectName" class="form-control" placeholder="Project name..." />
+                <input id="field-title" type="text" name="title" class="form-control" placeholder="Task title..." required />
                 <div class="task-edit__row">
                     <select name="priority" class="form-select">
                         <option value="low">low</option>
@@ -65,7 +134,6 @@
                         <option value="completed">completed</option>
                     </select>
                 </div>
-                <input type="hidden" name="project" :value="selected?.id" />
                 <div class="task-edit__actions">
                     <button type="submit">Add</button>
                     <button type="button" class="btn-ghost" @click="addModalOpen = false">Cancel</button>

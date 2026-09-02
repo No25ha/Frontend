@@ -16,22 +16,22 @@
 
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: var(--bg);
+  background: linear-gradient(180deg, #f3f4f8 0%, #eef2ff 100%);
   color: var(--text);
-  max-width: 1000px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
   line-height: 1.5;
 }
 
-h1 { margin: 0 0 .25rem; font-size: 1.8rem; }
+h1 { margin: 0 0 .25rem; font-size: 1.9rem; }
 h2 { font-size: 1.15rem; margin: 0; }
 .subtitle { color: var(--muted); margin-top: 0; }
 
 .section-head { margin-bottom: 1rem; }
 
 /* ---------- Layout ---------- */
-.layout { display: grid; grid-template-columns: 320px 1fr; gap: 1.5rem; align-items: start; }
+.layout { display: grid; grid-template-columns: 340px 1fr; gap: 1.5rem; align-items: start; }
 @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
 
 .panel { min-width: 0; }
@@ -40,34 +40,41 @@ h2 { font-size: 1.15rem; margin: 0; }
 
 /* ---------- Buttons ---------- */
 button {
-  cursor: pointer; font: inherit; border: none; border-radius: 8px;
-  padding: .55rem 1rem; background: var(--accent); color: #fff; transition: background .15s;
+  cursor: pointer; font: inherit; border: none; border-radius: 10px;
+  padding: .55rem 1rem; background: var(--accent); color: #fff; transition: all .15s ease;
 }
-button:hover { background: var(--accent-hover); }
+button:hover { background: var(--accent-hover); transform: translateY(-1px); }
 .btn-ghost { background: var(--card); color: var(--text); border: 1px solid var(--border); }
 .btn-ghost:hover { background: #f0f1f3; }
 .btn-icon {
   background: transparent; color: var(--muted); font-size: 1rem; line-height: 1;
-  padding: .25rem .5rem; border-radius: 6px;
+  padding: .4rem .55rem; border-radius: 8px; min-width: 2rem;
 }
 .btn-icon:hover { background: #eef0f3; color: var(--text); }
 .btn-delete:hover { background: #fdecec; color: var(--danger); }
 
 /* ---------- Project cards (master) ---------- */
-.project-list { display: flex; flex-direction: column; gap: .6rem; }
+.project-list { display: flex; flex-direction: column; gap: .75rem; }
 .project-card {
   background: var(--card); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: .9rem 1rem; box-shadow: var(--shadow);
+  border-radius: var(--radius); padding: 1.1rem 1.1rem; box-shadow: var(--shadow);
+  min-height: 120px; 
+  width: 370px;
 }
 .project-card--clickable { cursor: pointer; transition: border-color .15s, transform .05s; }
-.project-card--clickable:hover { border-color: var(--accent); }
+.project-card--clickable:hover { border-color: var(--accent); box-shadow: 0 8px 20px rgba(79, 70, 229, .08); }
 .project-card--clickable:active { transform: scale(.99); }
-.project-card__head { display: flex; align-items: center; gap: .5rem; }
-.project-card__name { margin: 0; margin-right: auto; font-size: 1rem; }
+.project-card__head { display: flex; align-items: flex-start; gap: .5rem; flex-wrap: wrap;}
+.project-card__name { margin: 0; margin-right: auto; font-size: 1rem; line-height: 1.3; }
 .project-card__desc { color: var(--muted); margin: .5rem 0 0; font-size: .9rem; }
+.project-card__actions { display: flex; align-items: center; gap: .25rem; margin-left: auto; margin-top: -2px; }
+.section-head--projects { display: flex; align-items: center; justify-content: space-between; }
+textarea.form-control {
+  resize: vertical; min-height: 90px;
+}
 
 /* ---------- Detail ---------- */
-.detail__head { display: flex; align-items: center; gap: .6rem; margin-bottom: 1rem; }
+.detail__head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: 1rem; }
 .detail__title { margin: 0; }
 
 /* ---------- Add / edit form ---------- */
@@ -77,13 +84,13 @@ button:hover { background: var(--accent-hover); }
   border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); margin-bottom: 1.2rem;
 }
 @media (max-width: 620px) { .add-form { grid-template-columns: 1fr 1fr; } }
-input, select {
-  padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; background: #fff;
+input, select, textarea {
+  padding: .6rem .75rem; border: 1px solid var(--border); border-radius: 10px; font: inherit; background: #fff;
 }
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid rgba(79, 70, 229, .22); outline-offset: -1px; border-color: var(--accent); }
 
 /* ---------- Task cards ---------- */
-.task-list { display: flex; flex-direction: column; gap: .6rem; }
+.task-list { display: flex; flex-direction: column; gap: .75rem; }
 .task-card {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
   background: var(--card); border: 1px solid var(--border);
@@ -100,11 +107,11 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .task-card__actions { display: flex; gap: .2rem; flex-shrink: 0; }
 
 /* ---------- Inline edit form ---------- */
-.task-edit { display: flex; flex-direction: column; gap: .5rem; }
+.task-edit { display: flex; flex-direction: column; gap: .7rem; }
 .task-edit__row { display: flex; gap: .5rem; }
 .task-edit__row select { flex: 1; }
 .task-edit__actions { display: flex; gap: .5rem; }
-.task-edit__actions button { padding: .4rem .9rem; }
+.task-edit__actions button { padding: .45rem .9rem; }
 
 /* ---------- Badges ---------- */
 .badge {
@@ -121,6 +128,52 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .state--archived { background: #f0f0f0; color: #6b7280; }
 
 .empty { color: var(--muted); font-style: italic; }
+
+/* ---------- Edit modal ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(15, 23, 42, .48);
+  display: flex; align-items: center; justify-content: center; padding: 1rem;
+}
+.modal .task-edit {
+  background: var(--card); border-radius: var(--radius);
+  padding: 1.4rem; width: min(440px, 92vw);
+  box-shadow: 0 18px 60px rgba(15, 23, 42, .25);
+  display: flex; flex-direction: column; gap: .75rem;
+}
+.modal .task-edit h3 { margin: 0 0 .2rem; }
+.modal .task-edit input, .modal .task-edit select, .modal .task-edit textarea { width: 100%; }
+
+/* ---------- Badges ---------- */
+.badge {
+  font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .02em;
+  padding: .15rem .5rem; border-radius: 999px; background: #eef0f3; color: #4b5563;
+}
+.badge--count { text-transform: none; font-weight: 500; }
+.priority--high { background: #fdecec; color: #c0392b; }
+.priority--low { background: #eef7ee; color: #2e7d32; }
+.state--pending { background: #eef0f3; color: #4b5563; }
+.state--active { background: #e7f0ff; color: #1d4ed8; }
+.state--paused { background: #fff4e5; color: #b45309; }
+.state--completed { background: #eafaf1; color: #157347; }
+.state--archived { background: #f0f0f0; color: #6b7280; }
+
+.empty { color: var(--muted); font-style: italic; }
+
+/* ---------- URL Import ---------- */
+.url-import { display: flex; flex-direction: column; gap: .4rem; }
+.url-import__label { font-size: .8rem; color: var(--muted); font-weight: 500; }
+.url-import__row { display: flex; gap: .5rem; }
+.url-import__row input { flex: 1; font-size: .85rem; }
+.url-import__preview {
+  display: flex; flex-wrap: wrap; gap: .35rem; padding: .5rem .6rem;
+  background: #f0f4ff; border-radius: 8px; border: 1px solid #dbe4ff;
+}
+.url-import__tag {
+  font-size: .78rem; color: var(--text); background: #fff;
+  padding: .15rem .5rem; border-radius: 6px; border: 1px solid var(--border);
+}
+.url-import__tag--path { color: var(--muted); font-size: .72rem; word-break: break-all; }
 
 /* ---------- Edit modal ---------- */
 .modal {
