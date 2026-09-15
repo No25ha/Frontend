@@ -25,10 +25,17 @@
       @refresh-tasks="$nextTick(() => { if(selected) $el.querySelector('.project-card[data-id=\'' + selected.id + '\']')?.click() })">
     <div>
         <header>
-            <h1>DailyFlow</h1>
-            <p class="subtitle">
-                Strapi returns HTML · HTMX handles requests · Alpine handles UI state
-            </p>
+            <div class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <div>
+                <h1>DailyFlow</h1>
+                <p class="subtitle">
+                    Strapi returns HTML · HTMX handles requests · Alpine handles UI state
+                </p>
+            </div>
         </header>
         <div class="layout">
             <aside class="panel">
@@ -58,7 +65,7 @@
             </main>
         </div>
 
-        <!-- Project Modal -->
+        
         <template x-if="projectModalOpen">
             <div class="modal" @click.self="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">
                 <template x-if="projectEditing">
@@ -105,10 +112,10 @@
             </div>
         </template>
 
-        <!-- Add Task Modal -->
+       
         <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
             <form class="task-edit" hx-post="/api/tasks/from-url" hx-target="#tasks" hx-swap="beforeend"
-                  @htmx:after-request="addModalOpen = false; $el.reset()">
+                @htmx:after-request="if ($event.detail.elt === $el) { addModalOpen = false; $el.reset() }">
                 <h3>New task</h3>
 
                 <label class="url-import__label">Import from URL (optional)</label>
@@ -141,7 +148,7 @@
             </form>
         </div>
 
-        <!-- Edit Task Modal -->
+       
         <template x-if="editing">
             <div class="modal" @click.self="editing = null">
                 <form class="task-edit"
@@ -172,8 +179,7 @@
                 </form>
             </div>
         </template>
-
-        <!-- Time Entry Modal -->
+        
         <template x-if="timeEntryModalOpen">
             <div class="modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
                 <form class="task-edit" hx-post="/api/time-entries" hx-swap="none"
