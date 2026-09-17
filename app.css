@@ -225,6 +225,7 @@ button:active { transform: translateY(0); }
 .project-card--clickable { cursor: pointer; transition: border-color .15s var(--ease), box-shadow .2s var(--ease), transform .05s var(--ease); }
 .project-card--clickable:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
 .project-card--clickable:active { transform: scale(.99); }
+.project-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .project-card__head { display: flex; align-items: flex-start; gap: .5rem; flex-wrap: wrap; }
 .project-card__name { margin: 0; margin-right: auto; font-size: 1rem; font-weight: 700; line-height: 1.3; }
 .project-card__desc { color: var(--text-muted); margin: .5rem 0 0; font-size: .88rem; }
@@ -235,6 +236,43 @@ textarea.form-control { resize: vertical; min-height: 90px; }
 /* ---------- Detail ---------- */
 .detail__head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: 1.1rem; }
 .detail__title { margin: 0; font-weight: 800; letter-spacing: -.01em; }
+
+/* ---------- Task toolbar (search / filter / sort) ---------- */
+.task-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.task-toolbar__search { flex: 1 1 200px; }
+.task-toolbar select { flex: 0 1 150px; }
+
+/* ---------- Load more / grouping ---------- */
+.load-more { display: block; width: 100%; margin-top: .25rem; text-align: center; }
+
+/* ---------- Numbered pagination (projects) ---------- */
+.pagination { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; margin-top: .85rem; }
+.pagination__page, .pagination__nav {
+  min-width: 2rem; height: 2rem; padding: 0 .5rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); font-weight: 600; font-size: .85rem;
+  box-shadow: none;
+}
+.pagination__page:hover:not(:disabled), .pagination__nav:hover:not(:disabled) {
+  background: var(--surface-hover); filter: none; transform: none; box-shadow: none;
+}
+.pagination__page.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pagination__page:disabled, .pagination__nav:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.pagination__ellipsis { color: var(--text-faint); padding: 0 .3rem; user-select: none; }
+.task-group-heading {
+  font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-faint); margin: 1rem 0 .35rem; padding-left: .2rem;
+}
+.task-group-heading:first-child { margin-top: 0; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: var(--bg);
+  padding: .7rem 1.1rem; border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg); font-size: .85rem; font-weight: 600;
+  z-index: 100; cursor: pointer; max-width: 90vw; text-align: center;
+}
 
 /* ---------- Forms ---------- */
 .add-form {
@@ -371,6 +409,50 @@ input:focus, select:focus, textarea:focus {
   animation: pop .18s var(--ease) both;
 }
 .modal .task-edit input, .modal .task-edit select, .modal .task-edit textarea { width: 100%; }
+
+/* ---------- Login screen ---------- */
+.login-screen {
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 2rem;
+  width: min(380px, 92vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .8rem;
+  text-align: center;
+}
+.login-card .form-control { width: 100%; }
+.login-card button[type="submit"] { width: 100%; margin-top: .3rem; }
+.login-card__error {
+  width: 100%;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: var(--radius-sm);
+  padding: .55rem .75rem;
+  font-size: .85rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+/* ---------- Header user / logout ---------- */
+.header-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: .85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 
 /* ---------- Motion ---------- */
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }

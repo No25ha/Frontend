@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DailyFlow</title>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
     <script defer src="/config.js"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="/app.css" />
 </head>
 <body x-data="{
@@ -17,64 +17,263 @@
         timeEntryTask: null,
         projectModalOpen: false,
         projectForm: { name: '', description: '', state: 'active' },
-        projectEditing: null
+        projectEditing: null,
+        taskFilters: { q: '', priority: '', state: '', sort: 'newest' },
+        projectFilters: { q: '', state: '' },
+        toast: null,
+        tasksPage: 1,
+        // Pre-filled with the currently selected project's name when the
+        // Add-task modal is opened from inside a project, so a new task
+        // actually lands in that project (and the duplicate-title check
+        // gets the right scope) instead of silently ending up project-less.
+        newTaskProjectName: '',
+        // ---------- Auth ----------
+        // The whole app sits behind a login screen — nothing here loads
+        // projects/tasks until a valid session is confirmed. The token
+        // lives in localStorage (this is a real page in the user's own
+        // browser, not an in-conversation preview) and is attached to
+        // every HTMX request by config.js.
+        authToken: null,
+        authUser: null,
+        authChecking: true,
+        loginForm: { identifier: '', password: '' },
+        loginError: '',
+        loginSubmitting: false,
+        initAuth() {
+            this.authToken = localStorage.getItem('dailyflow_token');
+            if (!this.authToken) { this.authChecking = false; return; }
+            this.fetchMe().then((ok) => {
+                this.authChecking = false;
+                if (ok) this.initProjectsFromUrl();
+            });
+        },
+        // Confirms the stored token is still valid and loads the
+        // authenticated user (with their role) — used both at startup
+        // and right after a successful login.
+        fetchMe() {
+            return fetch(window.API_BASE + '/api/users/me?populate=role', {
+                headers: { Authorization: 'Bearer ' + this.authToken }
+            })
+                .then((res) => {
+                    if (!res.ok) throw new Error('invalid session');
+                    return res.json();
+                })
+                .then((user) => { this.authUser = user; return true; })
+                .catch(() => { this.clearSession(); return false; });
+        },
+        login() {
+            this.loginError = '';
+            this.loginSubmitting = true;
+            fetch(window.API_BASE + '/api/auth/local', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ identifier: this.loginForm.identifier, password: this.loginForm.password })
+            })
+                .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok) {
+                        this.loginSubmitting = false;
+                        this.loginError = (data.error && data.error.message) || 'Login failed. Check your email/username and password.';
+                        return;
+                    }
+                    this.authToken = data.jwt;
+                    localStorage.setItem('dailyflow_token', data.jwt);
+                    this.loginForm = { identifier: '', password: '' };
+                    return this.fetchMe().then((ok2) => {
+                        this.loginSubmitting = false;
+                        if (ok2) this.initProjectsFromUrl();
+                    });
+                })
+                .catch(() => {
+                    this.loginSubmitting = false;
+                    this.loginError = 'Could not reach the server.';
+                });
+        },
+        clearSession() {
+            this.authToken = null;
+            this.authUser = null;
+            localStorage.removeItem('dailyflow_token');
+            this.selected = null;
+        },
+        logout() {
+            this.clearSession();
+        },
+        selectProject(el) {
+            this.selected = { id: el.dataset.id, name: el.dataset.name, count: Number(el.dataset.count) };
+            this.taskFilters = { q: '', priority: '', state: '', sort: 'newest' };
+            this.loadTasks(1);
+        },
+        tasksUrl(page) {
+            if (!this.selected) return null;
+            const params = new URLSearchParams();
+            params.set('filters[project][documentId][$eq]', this.selected.id);
+            if (this.taskFilters.q) params.set('filters[title][$containsi]', this.taskFilters.q);
+            if (this.taskFilters.priority) params.set('filters[priority][$eq]', this.taskFilters.priority);
+            if (this.taskFilters.state) params.set('filters[state][$eq]', this.taskFilters.state);
+            const sortMap = { newest: 'createdAt:desc', oldest: 'createdAt:asc', priority: 'priority:desc', planned: 'plannedDate:asc' };
+            params.set('sort', sortMap[this.taskFilters.sort] || 'createdAt:desc');
+            params.set('pagination[page]', page || 1);
+            return '/api/tasks?' + params.toString();
+        },
+        loadTasks(page) {
+            this.tasksPage = page || 1;
+            const url = this.tasksUrl(this.tasksPage);
+            if (!url) return;
+            htmx.ajax('GET', url, { target: '#tasks', swap: 'innerHTML' });
+        },
+        goToTasksPage(page) {
+            this.loadTasks(page);
+        },
+        projectsPage: 1,
+        projectsUrl(page) {
+            const params = new URLSearchParams();
+            if (this.projectFilters.q) params.set('filters[name][$containsi]', this.projectFilters.q);
+            if (this.projectFilters.state) params.set('filters[state][$eq]', this.projectFilters.state);
+            params.set('pagination[page]', page || 1);
+            return '/api/projects?' + params.toString();
+        },
+        // Loads a page of projects and mirrors the current search/filter/page
+        // onto the page's own URL (?projects_q=…&projects_state=…&projects_page=…)
+        // so a refresh or a shared link lands back on the same view.
+        loadProjects(page) {
+            this.projectsPage = page || 1;
+            htmx.ajax('GET', this.projectsUrl(this.projectsPage), { target: '#projects', swap: 'innerHTML' });
+
+            const params = new URLSearchParams(window.location.search);
+            this.projectFilters.q ? params.set('projects_q', this.projectFilters.q) : params.delete('projects_q');
+            this.projectFilters.state ? params.set('projects_state', this.projectFilters.state) : params.delete('projects_state');
+            this.projectsPage > 1 ? params.set('projects_page', this.projectsPage) : params.delete('projects_page');
+            const query = params.toString();
+            window.history.replaceState({}, '', window.location.pathname + (query ? '?' + query : ''));
+        },
+        goToProjectsPage(page) {
+            this.loadProjects(page);
+        },
+        // Restores search/filter/page from the URL on first load, so a
+        // refresh or a bookmarked link returns to the same projects view.
+        initProjectsFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            this.projectFilters.q = params.get('projects_q') || '';
+            this.projectFilters.state = params.get('projects_state') || '';
+            this.loadProjects(parseInt(params.get('projects_page'), 10) || 1);
+        }
     }"
       @open-edit="editing = $event.detail"
       @open-project-edit="projectEditing = $event.detail; projectForm = { name: $event.detail.name || '', description: $event.detail.description || '', state: $event.detail.state || 'active' }; projectModalOpen = true"
       @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
-      @refresh-tasks="$nextTick(() => { if(selected) $el.querySelector('.project-card[data-id=\'' + selected.id + '\']')?.click() })">
+      @refresh-tasks="$nextTick(() => { if(selected) loadTasks(tasksPage) })"
+      @refresh-projects="$nextTick(() => loadProjects(projectsPage))"
+      @show-toast.window="toast = $event.detail; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
+      @session-expired.window="clearSession(); toast = 'Your session has expired — please log in again.'; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
+      x-init="initAuth()">
     <div>
-        <header>
-            <div class="brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </div>
-            <div>
+        <div class="toast" x-show="toast" x-cloak x-transition x-text="toast" @click="toast = null"></div>
+
+        <div class="login-screen" x-show="!authChecking && !authToken" x-cloak>
+            <form class="login-card" @submit.prevent="login()">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
                 <h1>DailyFlow</h1>
-                <p class="subtitle">
-                    Strapi returns HTML · HTMX handles requests · Alpine handles UI state
-                </p>
-            </div>
-        </header>
-        <div class="layout">
-            <aside class="panel">
-                <div class="section-head section-head--projects">
-                    <h2>Projects</h2>
-                    <button type="button" class="btn-icon" @click="projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
-                </div>
-                <div id="projects" class="project-list" hx-get="/api/projects"
-                    hx-trigger="load" hx-target="#projects" hx-swap="innerHTML">
-                    Loading projects...
-                </div>
-            </aside>
-            <main class="panel">
-                <p x-show="!selected" class="empty placeholder">
-                    ← Select a project to see its tasks.
-                </p>
-                <div x-show="selected" x-cloak>
-                    <header class="detail__head">
-                        <div>
-                            <h2 class="detail__title" x-text="selected?.name"></h2>
-                            <span class="badge" x-text="(selected?.count || 0) + ' tasks'"></span>
-                        </div>
-                        <button type="button" class="btn-icon" @click="addModalOpen = true" title="Add task">➕</button>
-                    </header>
-                    <div id="tasks" class="task-list"></div>
-                </div>
-            </main>
+                <p class="subtitle">Sign in to continue</p>
+                <div class="login-card__error" x-show="loginError" x-cloak x-text="loginError"></div>
+                <input type="text" name="identifier" class="form-control" placeholder="Email or username"
+                       x-model="loginForm.identifier" required autocomplete="username" />
+                <input type="password" name="password" class="form-control" placeholder="Password"
+                       x-model="loginForm.password" required autocomplete="current-password" />
+                <button type="submit" :disabled="loginSubmitting" x-text="loginSubmitting ? 'Signing in…' : 'Sign in'"></button>
+            </form>
         </div>
 
-        
+        <div x-show="authToken" x-cloak>
+            <header>
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>DailyFlow</h1>
+                    <p class="subtitle">
+                        Strapi returns HTML · HTMX handles requests · Alpine handles UI state
+                    </p>
+                </div>
+                <div class="header-user">
+                    <span x-text="authUser?.username"></span>
+                    <span class="badge" x-show="authUser?.role?.name" x-text="authUser?.role?.name"></span>
+                    <button type="button" class="btn-ghost" @click="logout()">Log out</button>
+                </div>
+            </header>
+            <div class="layout">
+                <aside class="panel">
+                    <div class="section-head section-head--projects">
+                        <h2>Projects</h2>
+                        <button type="button" class="btn-icon" @click="projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
+                    </div>
+                    <div class="project-toolbar">
+                        <input type="search" class="form-control project-toolbar__search" placeholder="Search projects…"
+                               x-model="projectFilters.q" @input.debounce.400ms="loadProjects()" />
+                        <select class="form-select" x-model="projectFilters.state" @change="loadProjects()">
+                            <option value="">All states</option>
+                            <option value="active">Active</option>
+                            <option value="archived">Archived</option>
+                        </select>
+                    </div>
+                    <div id="projects" class="project-list">
+                        Loading projects...
+                    </div>
+                </aside>
+                <main class="panel">
+                    <p x-show="!selected" class="empty placeholder">
+                        ← Select a project to see its tasks.
+                    </p>
+                    <div x-show="selected" x-cloak>
+                        <header class="detail__head">
+                            <div>
+                                <h2 class="detail__title" x-text="selected?.name"></h2>
+                                <span class="badge" x-text="(selected?.count || 0) + ' tasks'"></span>
+                            </div>
+                            <button type="button" class="btn-icon" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">➕</button>
+                        </header>
+                        <div class="task-toolbar">
+                            <input type="search" class="form-control task-toolbar__search" placeholder="Search tasks…"
+                                   x-model="taskFilters.q" @input.debounce.400ms="loadTasks()" />
+                            <select class="form-select" x-model="taskFilters.priority" @change="loadTasks()">
+                                <option value="">All priorities</option>
+                                <option value="low">Low priority</option>
+                                <option value="high">High priority</option>
+                            </select>
+                            <select class="form-select" x-model="taskFilters.state" @change="loadTasks()">
+                                <option value="">All states</option>
+                                <option value="pending">Pending</option>
+                                <option value="active">Active</option>
+                                <option value="paused">Paused</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                            <select class="form-select" x-model="taskFilters.sort" @change="loadTasks()">
+                                <option value="newest">Newest first</option>
+                                <option value="oldest">Oldest first</option>
+                                <option value="priority">By priority</option>
+                                <option value="planned">By planned date</option>
+                            </select>
+                        </div>
+                        <div id="tasks" class="task-list" :data-sort="taskFilters.sort"></div>
+                    </div>
+                </main>
+            </div>
+        </div>
+
+
         <template x-if="projectModalOpen">
             <div class="modal" @click.self="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">
                 <template x-if="projectEditing">
                     <form class="task-edit"
                           :hx-put="'/api/projects/' + projectEditing.id"
-                          hx-target="#projects"
-                          hx-swap="innerHTML"
+                          hx-swap="none"
                           x-init="htmx.process($el)"
-                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset()">
+                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset(); $dispatch('refresh-projects')">
                         <h3>Edit project</h3>
                         <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
                         <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
@@ -92,10 +291,9 @@
                 <template x-if="!projectEditing">
                     <form class="task-edit"
                           hx-post="/api/projects"
-                          hx-target="#projects"
-                          hx-swap="innerHTML"
+                          hx-swap="none"
                           x-init="htmx.process($el)"
-                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset()">
+                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset(); $dispatch('refresh-projects')">
                         <h3>New project</h3>
                         <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
                         <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
@@ -112,10 +310,10 @@
             </div>
         </template>
 
-       
+
         <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
-            <form class="task-edit" hx-post="/api/tasks/from-url" hx-target="#tasks" hx-swap="beforeend"
-                @htmx:after-request="if ($event.detail.elt === $el) { addModalOpen = false; $el.reset() }">
+            <form class="task-edit" hx-post="/api/tasks/from-url" hx-swap="none"
+                @htmx:after-request="if ($event.detail.elt === $el && $event.detail.successful) { addModalOpen = false; $el.reset(); newTaskProjectName = ''; $dispatch('refresh-tasks'); $dispatch('refresh-projects') }">
                 <h3>New task</h3>
 
                 <label class="url-import__label">Import from URL (optional)</label>
@@ -127,7 +325,7 @@
                        hx-swap="innerHTML" />
                 <div id="url-preview"></div>
 
-                <input id="field-projectName" type="text" name="projectName" class="form-control" placeholder="Project name..." />
+                <input id="field-projectName" type="text" name="projectName" class="form-control" placeholder="Project name..." x-model="newTaskProjectName" />
                 <input id="field-title" type="text" name="title" class="form-control" placeholder="Task title..." required />
                 <div class="task-edit__row">
                     <select name="priority" class="form-select">
@@ -148,7 +346,7 @@
             </form>
         </div>
 
-       
+
         <template x-if="editing">
             <div class="modal" @click.self="editing = null">
                 <form class="task-edit"
@@ -179,7 +377,7 @@
                 </form>
             </div>
         </template>
-        
+
         <template x-if="timeEntryModalOpen">
             <div class="modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
                 <form class="task-edit" hx-post="/api/time-entries" hx-swap="none"
