@@ -4,10 +4,63 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DailyFlow</title>
+    <meta name="htmx-config" content='{"selfRequestsOnly": false}'>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <script defer src="/config.js"></script>
     <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="/app.css" />
+    <script>
+    window.API_BASE = 'http://127.0.0.1:1337';
+
+    document.addEventListener('htmx:validateUrl', function(e) {
+      var allowed = new URL(window.API_BASE).origin;
+      if (!e.detail.sameHost && new URL(e.detail.url, location.href).origin !== allowed) e.preventDefault();
+    });
+
+    document.addEventListener('htmx:configRequest', function(e) {
+      if (e.detail.path.startsWith('/')) e.detail.path = window.API_BASE + e.detail.path;
+      if (e.detail.verb === 'get') {
+        for (var key of Object.keys(e.detail.parameters)) {
+          if (e.detail.parameters[key] === '') delete e.detail.parameters[key];
+        }
+      }
+      var token = localStorage.getItem('dailyflow_token');
+      if (token) e.detail.headers['Authorization'] = 'Bearer ' + token;
+    });
+
+    document.addEventListener('htmx:beforeSwap', function(e) {
+      if (e.detail.xhr.status === 204) { e.detail.shouldSwap = true; e.detail.isError = false; }
+    });
+
+    document.addEventListener('htmx:afterSettle', function(e) {
+      if (window.Alpine) Alpine.initTree(e.detail.target);
+    });
+
+    document.addEventListener('htmx:responseError', function(e) {
+      var xhr = e.detail.xhr;
+      if (xhr && typeof xhr.responseText === 'string' && xhr.responseText.includes('dailyflow:duplicate-task-title')) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: 'A task with this title already exists in this project.' }));
+        return;
+      }
+      var msg = null;
+      try { var body = JSON.parse(xhr.responseText); msg = body && body.error && body.error.message; if (msg === 'Forbidden' || msg === 'Unauthorized') msg = null; } catch(err) {}
+      if (xhr && (xhr.status === 401 || xhr.status === 403)) {
+        var token = localStorage.getItem('dailyflow_token');
+        if (!token) { window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Please log in.' })); return; }
+        fetch(window.API_BASE + '/api/users/me', { headers: { Authorization: 'Bearer ' + token } })
+          .then(function(res) {
+            if (!res.ok) { localStorage.removeItem('dailyflow_token'); window.dispatchEvent(new CustomEvent('session-expired')); return; }
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: msg || 'Request failed (' + xhr.status + '). Please try again.' }));
+          })
+          .catch(function() { window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Request failed (' + xhr.status + '). Please try again.' })); });
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: msg || 'Request failed (' + xhr.status + '). Please try again.' }));
+    });
+
+    document.addEventListener('htmx:sendError', function() {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Could not reach the server. Check your connection.' }));
+    });
+    </script>
 </head>
 <body x-data="{
         selected: null,
@@ -17,10 +70,7 @@
         timeEntryTask: null,
         projectModalOpen: false,
         projectForm: { name: '', description: '', state: 'active' },
-        taskFilters: { q: '', priority: '', state: '', sort: 'newest' },
-        projectFilters: { q: '', state: '' },
         toast: null,
-        tasksPage: 1,
         newTaskProjectName: '',
         // ---------- Auth ----------
         authToken: null,
@@ -34,7 +84,7 @@
             if (!this.authToken) { this.authChecking = false; return; }
             this.fetchMe().then((ok) => {
                 this.authChecking = false;
-                if (ok) this.initProjectsFromUrl();
+                if (ok) this.$dispatch('load-projects');
             });
         },
         fetchMe() {
@@ -68,7 +118,7 @@
                     this.loginForm = { identifier: '', password: '' };
                     return this.fetchMe().then((ok2) => {
                         this.loginSubmitting = false;
-                        if (ok2) this.initProjectsFromUrl();
+                        if (ok2) this.$dispatch('load-projects');
                     });
                 })
                 .catch(() => {
@@ -86,6 +136,16 @@
         isManager() {
             const type = this.authUser?.role?.type;
             return type === 'owner' || type === 'team_lead';
+        },
+        _perms: {
+            owner: { 'project.create': 1, 'project.update': 1, 'project.delete': 1, 'task.create': 1, 'task.update': 1, 'task.delete': 1, 'time-entry.create': 1, 'time-entry.update': 1, 'time-entry.delete': 1, 'team.view': 1, 'team.createTeamLead': 1, 'team.deleteTeamLead': 1, 'team.createEmployee': 1, 'team.deleteEmployee': 1, 'team.resetTeamLeadPassword': 1, 'team.resetEmployeePassword': 1 },
+            team_lead: { 'project.create': 1, 'project.update': 1, 'project.delete': 1, 'task.create': 1, 'task.update': 1, 'task.delete': 1, 'time-entry.create': 1, 'time-entry.update': 1, 'time-entry.delete': 1, 'team.view': 1, 'team.createEmployee': 1, 'team.deleteEmployee': 1, 'team.resetEmployeePassword': 1 },
+            employee: { 'task.create': 1, 'task.update': 1, 'time-entry.create': 1, 'time-entry.update': 1, 'time-entry.delete': 1 }
+        },
+        can(permission) {
+            const roleType = this.authUser?.role?.type;
+            if (!roleType) return false;
+            return !!(this._perms[roleType] && this._perms[roleType][permission]);
         },
         // ---------- Account (change own password) ----------
         accountModalOpen: false,
@@ -126,7 +186,7 @@
                     this.authToken = data.jwt;
                     localStorage.setItem('dailyflow_token', data.jwt);
                     this.accountModalOpen = false;
-                    showToast('Password changed.');
+                    window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Password changed.' }));
                 })
                 .catch(() => {
                     this.changePasswordSubmitting = false;
@@ -140,59 +200,14 @@
         },
         selectProject(el) {
             this.selected = { id: el.dataset.id, name: el.dataset.name, count: Number(el.dataset.count) };
-            this.taskFilters = { q: '', priority: '', state: '', sort: 'newest' };
-            this.loadTasks(1);
-        },
-        tasksUrl(page) {
-            if (!this.selected) return null;
-            const params = new URLSearchParams();
-            params.set('filters[project][documentId][$eq]', this.selected.id);
-            if (this.taskFilters.q) params.set('filters[title][$containsi]', this.taskFilters.q);
-            if (this.taskFilters.priority) params.set('filters[priority][$eq]', this.taskFilters.priority);
-            if (this.taskFilters.state) params.set('filters[state][$eq]', this.taskFilters.state);
-            const sortMap = { newest: 'createdAt:desc', oldest: 'createdAt:asc', priority: 'priority:desc', planned: 'plannedDate:asc' };
-            params.set('sort', sortMap[this.taskFilters.sort] || 'createdAt:desc');
-            params.set('pagination[page]', page || 1);
-            return '/api/tasks?' + params.toString();
-        },
-        loadTasks(page) {
-            this.tasksPage = page || 1;
-            const url = this.tasksUrl(this.tasksPage);
-            if (!url) return;
-            htmx.ajax('GET', url, { target: '#tasks', swap: 'innerHTML' });
-        },
-        goToTasksPage(page) { this.loadTasks(page); },
-        projectsPage: 1,
-        projectsUrl(page) {
-            const params = new URLSearchParams();
-            if (this.projectFilters.q) params.set('filters[name][$containsi]', this.projectFilters.q);
-            if (this.projectFilters.state) params.set('filters[state][$eq]', this.projectFilters.state);
-            params.set('pagination[page]', page || 1);
-            return '/api/projects?' + params.toString();
-        },
-        loadProjects(page) {
-            this.projectsPage = page || 1;
-            htmx.ajax('GET', this.projectsUrl(this.projectsPage), { target: '#projects', swap: 'innerHTML' });
-
-            const params = new URLSearchParams(window.location.search);
-            this.projectFilters.q ? params.set('projects_q', this.projectFilters.q) : params.delete('projects_q');
-            this.projectFilters.state ? params.set('projects_state', this.projectFilters.state) : params.delete('projects_state');
-            this.projectsPage > 1 ? params.set('projects_page', this.projectsPage) : params.delete('projects_page');
-            const query = params.toString();
-            window.history.replaceState({}, '', window.location.pathname + (query ? '?' + query : ''));
-        },
-        goToProjectsPage(page) { this.loadProjects(page); },
-        initProjectsFromUrl() {
-            const params = new URLSearchParams(window.location.search);
-            this.projectFilters.q = params.get('projects_q') || '';
-            this.projectFilters.state = params.get('projects_state') || '';
-            this.loadProjects(parseInt(params.get('projects_page'), 10) || 1);
+            if (this.$refs.taskForm) this.$refs.taskForm.reset();
+            this.$nextTick(() => this.$dispatch('load-tasks'));
         }
     }"
       @open-edit="editing = $event.detail"
       @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
-      @refresh-tasks="$nextTick(() => { if(selected) loadTasks(tasksPage) })"
-      @refresh-projects="$nextTick(() => loadProjects(projectsPage))"
+      @refresh-tasks="if(selected) $dispatch('load-tasks')"
+      @refresh-projects="$dispatch('load-projects')"
       @show-toast.window="toast = $event.detail; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
       @session-expired.window="clearSession(); toast = 'Your session has expired — please log in again.'; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
       x-init="initAuth()">
@@ -243,17 +258,18 @@
                 <aside class="panel">
                     <div class="section-head section-head--projects">
                         <h2>Projects</h2>
-                        <button type="button" class="btn-icon" @click="projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
+                        <button type="button" class="btn-icon" x-show="can('project.create')" @click="projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
                     </div>
-                    <div class="project-toolbar">
-                        <input type="search" class="form-control project-toolbar__search" placeholder="Search projects…"
-                               x-model="projectFilters.q" @input.debounce.400ms="loadProjects()" />
-                        <select class="form-select" x-model="projectFilters.state" @change="loadProjects()">
+                    <form id="project-filters" class="project-toolbar"
+                          hx-get="/api/projects" hx-target="#projects" hx-swap="innerHTML"
+                          hx-trigger="load-projects from:body, input changed delay:400ms from:find input, change from:find select">
+                        <input type="search" name="filters[name][$containsi]" class="form-control project-toolbar__search" placeholder="Search projects…" />
+                        <select name="filters[state][$eq]" class="form-select">
                             <option value="">All states</option>
                             <option value="active">Active</option>
                             <option value="archived">Archived</option>
                         </select>
-                    </div>
+                    </form>
                     <div id="projects" class="project-list">
                         Loading projects...
                     </div>
@@ -270,29 +286,31 @@
                             </div>
                             <button type="button" class="btn-icon" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">➕</button>
                         </header>
-                        <div class="task-toolbar">
-                            <input type="search" class="form-control task-toolbar__search" placeholder="Search tasks…"
-                                   x-model="taskFilters.q" @input.debounce.400ms="loadTasks()" />
-                            <select class="form-select" x-model="taskFilters.priority" @change="loadTasks()">
+                        <form id="task-filters" x-ref="taskForm" class="task-toolbar"
+                              hx-get="/api/tasks" hx-target="#tasks" hx-swap="innerHTML"
+                              hx-trigger="load-tasks from:body, input changed delay:400ms from:find input, change from:find select">
+                            <input type="hidden" name="filters[project][documentId][$eq]" :value="selected?.id" />
+                            <input type="search" name="filters[title][$containsi]" class="form-control task-toolbar__search" placeholder="Search tasks…" />
+                            <select name="filters[priority][$eq]" class="form-select">
                                 <option value="">All priorities</option>
                                 <option value="low">Low priority</option>
                                 <option value="high">High priority</option>
                             </select>
-                            <select class="form-select" x-model="taskFilters.state" @change="loadTasks()">
+                            <select name="filters[state][$eq]" class="form-select">
                                 <option value="">All states</option>
                                 <option value="pending">Pending</option>
                                 <option value="active">Active</option>
                                 <option value="paused">Paused</option>
                                 <option value="completed">Completed</option>
                             </select>
-                            <select class="form-select" x-model="taskFilters.sort" @change="loadTasks()">
-                                <option value="newest">Newest first</option>
-                                <option value="oldest">Oldest first</option>
-                                <option value="priority">By priority</option>
-                                <option value="planned">By planned date</option>
+                            <select name="sort" class="form-select">
+                                <option value="createdAt:desc">Newest first</option>
+                                <option value="createdAt:asc">Oldest first</option>
+                                <option value="priority:desc">By priority</option>
+                                <option value="plannedDate:asc">By planned date</option>
                             </select>
-                        </div>
-                        <div id="tasks" class="task-list" :data-sort="taskFilters.sort"></div>
+                        </form>
+                        <div id="tasks" class="task-list"></div>
                     </div>
                 </main>
             </div>
