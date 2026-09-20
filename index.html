@@ -17,22 +17,12 @@
         timeEntryTask: null,
         projectModalOpen: false,
         projectForm: { name: '', description: '', state: 'active' },
-        projectEditing: null,
         taskFilters: { q: '', priority: '', state: '', sort: 'newest' },
         projectFilters: { q: '', state: '' },
         toast: null,
         tasksPage: 1,
-        // Pre-filled with the currently selected project's name when the
-        // Add-task modal is opened from inside a project, so a new task
-        // actually lands in that project (and the duplicate-title check
-        // gets the right scope) instead of silently ending up project-less.
         newTaskProjectName: '',
         // ---------- Auth ----------
-        // The whole app sits behind a login screen — nothing here loads
-        // projects/tasks until a valid session is confirmed. The token
-        // lives in localStorage (this is a real page in the user's own
-        // browser, not an in-conversation preview) and is attached to
-        // every HTMX request by config.js.
         authToken: null,
         authUser: null,
         authChecking: true,
@@ -47,9 +37,6 @@
                 if (ok) this.initProjectsFromUrl();
             });
         },
-        // Confirms the stored token is still valid and loads the
-        // authenticated user (with their role) — used both at startup
-        // and right after a successful login.
         fetchMe() {
             return fetch(window.API_BASE + '/api/users/me?populate=role', {
                 headers: { Authorization: 'Bearer ' + this.authToken }
@@ -95,8 +82,61 @@
             localStorage.removeItem('dailyflow_token');
             this.selected = null;
         },
-        logout() {
-            this.clearSession();
+        logout() { this.clearSession(); },
+        isManager() {
+            const type = this.authUser?.role?.type;
+            return type === 'owner' || type === 'team_lead';
+        },
+        // ---------- Account (change own password) ----------
+        accountModalOpen: false,
+        changePasswordForm: { currentPassword: '', password: '', passwordConfirmation: '' },
+        changePasswordError: '',
+        changePasswordSubmitting: false,
+        openAccountModal() {
+            this.changePasswordForm = { currentPassword: '', password: '', passwordConfirmation: '' };
+            this.changePasswordError = '';
+            this.accountModalOpen = true;
+        },
+        changePassword() {
+            this.changePasswordError = '';
+            if (this.changePasswordForm.password.length < 6) {
+                this.changePasswordError = 'New password must be at least 6 characters.';
+                return;
+            }
+            if (this.changePasswordForm.password !== this.changePasswordForm.passwordConfirmation) {
+                this.changePasswordError = 'New passwords do not match.';
+                return;
+            }
+            this.changePasswordSubmitting = true;
+            fetch(window.API_BASE + '/api/auth/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + this.authToken },
+                body: JSON.stringify({
+                    currentPassword: this.changePasswordForm.currentPassword,
+                    password: this.changePasswordForm.password,
+                })
+            })
+                .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+                .then(({ ok, data }) => {
+                    this.changePasswordSubmitting = false;
+                    if (!ok) {
+                        this.changePasswordError = (data.error && data.error.message) || 'Could not change password.';
+                        return;
+                    }
+                    this.authToken = data.jwt;
+                    localStorage.setItem('dailyflow_token', data.jwt);
+                    this.accountModalOpen = false;
+                    showToast('Password changed.');
+                })
+                .catch(() => {
+                    this.changePasswordSubmitting = false;
+                    this.changePasswordError = 'Could not reach the server.';
+                });
+        },
+        // ---------- Projects / Tasks ----------
+        closeProjectModal() {
+            this.projectModalOpen = false;
+            this.projectForm = { name: '', description: '', state: 'active' };
         },
         selectProject(el) {
             this.selected = { id: el.dataset.id, name: el.dataset.name, count: Number(el.dataset.count) };
@@ -121,9 +161,7 @@
             if (!url) return;
             htmx.ajax('GET', url, { target: '#tasks', swap: 'innerHTML' });
         },
-        goToTasksPage(page) {
-            this.loadTasks(page);
-        },
+        goToTasksPage(page) { this.loadTasks(page); },
         projectsPage: 1,
         projectsUrl(page) {
             const params = new URLSearchParams();
@@ -132,9 +170,6 @@
             params.set('pagination[page]', page || 1);
             return '/api/projects?' + params.toString();
         },
-        // Loads a page of projects and mirrors the current search/filter/page
-        // onto the page's own URL (?projects_q=…&projects_state=…&projects_page=…)
-        // so a refresh or a shared link lands back on the same view.
         loadProjects(page) {
             this.projectsPage = page || 1;
             htmx.ajax('GET', this.projectsUrl(this.projectsPage), { target: '#projects', swap: 'innerHTML' });
@@ -146,11 +181,7 @@
             const query = params.toString();
             window.history.replaceState({}, '', window.location.pathname + (query ? '?' + query : ''));
         },
-        goToProjectsPage(page) {
-            this.loadProjects(page);
-        },
-        // Restores search/filter/page from the URL on first load, so a
-        // refresh or a bookmarked link returns to the same projects view.
+        goToProjectsPage(page) { this.loadProjects(page); },
         initProjectsFromUrl() {
             const params = new URLSearchParams(window.location.search);
             this.projectFilters.q = params.get('projects_q') || '';
@@ -159,7 +190,6 @@
         }
     }"
       @open-edit="editing = $event.detail"
-      @open-project-edit="projectEditing = $event.detail; projectForm = { name: $event.detail.name || '', description: $event.detail.description || '', state: $event.detail.state || 'active' }; projectModalOpen = true"
       @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
       @refresh-tasks="$nextTick(() => { if(selected) loadTasks(tasksPage) })"
       @refresh-projects="$nextTick(() => loadProjects(projectsPage))"
@@ -203,6 +233,9 @@
                 <div class="header-user">
                     <span x-text="authUser?.username"></span>
                     <span class="badge" x-show="authUser?.role?.name" x-text="authUser?.role?.name"></span>
+                    <button type="button" class="btn-ghost" x-show="isManager()"
+                        hx-get="/api/team/modal" hx-target="#modal-container" hx-swap="innerHTML">Team</button>
+                    <button type="button" class="btn-ghost" @click="openAccountModal()">Account</button>
                     <button type="button" class="btn-ghost" @click="logout()">Log out</button>
                 </div>
             </header>
@@ -210,7 +243,7 @@
                 <aside class="panel">
                     <div class="section-head section-head--projects">
                         <h2>Projects</h2>
-                        <button type="button" class="btn-icon" @click="projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
+                        <button type="button" class="btn-icon" @click="projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
                     </div>
                     <div class="project-toolbar">
                         <input type="search" class="form-control project-toolbar__search" placeholder="Search projects…"
@@ -266,51 +299,53 @@
         </div>
 
 
+        <!-- New project modal -->
         <template x-if="projectModalOpen">
-            <div class="modal" @click.self="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">
-                <template x-if="projectEditing">
-                    <form class="task-edit"
-                          :hx-put="'/api/projects/' + projectEditing.id"
-                          hx-swap="none"
-                          x-init="htmx.process($el)"
-                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset(); $dispatch('refresh-projects')">
-                        <h3>Edit project</h3>
-                        <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
-                        <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
-                        <select name="state" class="form-select" x-model="projectForm.state">
-                            <option value="active">active</option>
-                            <option value="archived">archived</option>
-                        </select>
-                        <div class="task-edit__actions">
-                            <button type="submit">Save</button>
-                            <button type="button" class="btn-ghost" @click="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">Cancel</button>
-                        </div>
-                    </form>
-                </template>
-
-                <template x-if="!projectEditing">
-                    <form class="task-edit"
-                          hx-post="/api/projects"
-                          hx-swap="none"
-                          x-init="htmx.process($el)"
-                          @htmx:after-request="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }; $el.reset(); $dispatch('refresh-projects')">
-                        <h3>New project</h3>
-                        <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
-                        <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
-                        <select name="state" class="form-select" x-model="projectForm.state">
-                            <option value="active">active</option>
-                            <option value="archived">archived</option>
-                        </select>
-                        <div class="task-edit__actions">
-                            <button type="submit">Add</button>
-                            <button type="button" class="btn-ghost" @click="projectModalOpen = false; projectEditing = null; projectForm = { name: '', description: '', state: 'active' }">Cancel</button>
-                        </div>
-                    </form>
-                </template>
+            <div class="modal" @click.self="closeProjectModal()">
+                <form class="task-edit"
+                      hx-post="/api/projects"
+                      hx-swap="none"
+                      x-init="htmx.process($el)"
+                      @htmx:after-request="closeProjectModal(); $el.reset(); $dispatch('refresh-projects')">
+                    <h3>New project</h3>
+                    <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
+                    <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
+                    <select name="state" class="form-select" x-model="projectForm.state">
+                        <option value="active">active</option>
+                        <option value="archived">archived</option>
+                    </select>
+                    <p class="form-hint">Save the project first, then reopen it to assign team members.</p>
+                    <div class="task-edit__actions">
+                        <button type="submit">Add</button>
+                        <button type="button" class="btn-ghost" @click="closeProjectModal()">Cancel</button>
+                    </div>
+                </form>
             </div>
         </template>
 
 
+        <!-- Account modal (change own password) -->
+        <template x-if="accountModalOpen">
+            <div class="modal" @click.self="accountModalOpen = false">
+                <form class="task-edit" @submit.prevent="changePassword()">
+                    <h3>Change password</h3>
+                    <div class="login-card__error" x-show="changePasswordError" x-cloak x-text="changePasswordError"></div>
+                    <input type="password" class="form-control" placeholder="Current password"
+                           x-model="changePasswordForm.currentPassword" required autocomplete="current-password" />
+                    <input type="password" class="form-control" placeholder="New password"
+                           x-model="changePasswordForm.password" required minlength="6" autocomplete="new-password" />
+                    <input type="password" class="form-control" placeholder="Confirm new password"
+                           x-model="changePasswordForm.passwordConfirmation" required minlength="6" autocomplete="new-password" />
+                    <div class="task-edit__actions">
+                        <button type="submit" :disabled="changePasswordSubmitting" x-text="changePasswordSubmitting ? 'Saving…' : 'Save'"></button>
+                        <button type="button" class="btn-ghost" @click="accountModalOpen = false">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </template>
+
+
+        <!-- Add task modal (from URL) -->
         <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
             <form class="task-edit" hx-post="/api/tasks/from-url" hx-swap="none"
                 @htmx:after-request="if ($event.detail.elt === $el && $event.detail.successful) { addModalOpen = false; $el.reset(); newTaskProjectName = ''; $dispatch('refresh-tasks'); $dispatch('refresh-projects') }">
@@ -347,6 +382,7 @@
         </div>
 
 
+        <!-- Edit task modal -->
         <template x-if="editing">
             <div class="modal" @click.self="editing = null">
                 <form class="task-edit"
@@ -378,6 +414,7 @@
             </div>
         </template>
 
+        <!-- Time entry modal -->
         <template x-if="timeEntryModalOpen">
             <div class="modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
                 <form class="task-edit" hx-post="/api/time-entries" hx-swap="none"
@@ -394,6 +431,9 @@
                 </form>
             </div>
         </template>
+
+        <!-- Container for HTMX-loaded modals (team, project edit) -->
+        <div id="modal-container"></div>
     </div>
 </body>
 </html>
