@@ -358,6 +358,12 @@ input:focus, select:focus, textarea:focus {
 .time-entry-card__actions { display: flex; gap: .15rem; }
 .time-entry-card__duration { font-weight: 600; color: var(--text); }
 
+.time-entry-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.time-entry-table th { text-align: left; padding: .4rem .5rem; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
+.time-entry-table td { padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
+.time-entry-table tfoot td { border-bottom: none; border-top: 2px solid var(--border); }
+#time-entry-list { max-height: 300px; overflow-y: auto; }
+
 /* ---------- Inline edit form ---------- */
 .task-edit { display: flex; flex-direction: column; gap: .7rem; }
 .task-edit h3 { margin: 0 0 .15rem; font-weight: 800; letter-spacing: -.01em; }
@@ -688,6 +694,33 @@ fieldset input[type="checkbox"] { width: auto; }
   .task-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .task-toolbar__search { grid-column: 1 / -1; }
   .project-toolbar { grid-template-columns: minmax(0, 1fr) 140px; }
+}
+
+/* ---------- Group management ---------- */
+.group-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem;
+  padding: .7rem .8rem; background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.group-row:hover { border-color: var(--accent); }
+.group-row__info { display: flex; flex-direction: column; gap: .15rem; }
+.group-row__name { font-weight: 700; font-size: .92rem; }
+.group-row__detail { color: var(--text-muted); font-size: .78rem; }
+.group-row__members, .group-row__projects { color: var(--text-faint); font-size: .75rem; }
+
+#group-modal > .task-edit {
+  width: min(680px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#group-modal .team-list {
+  flex: 0 0 auto;
+  min-height: 4rem;
+  max-height: min(42vh, 360px);
+  padding: .15rem .2rem .25rem;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ---------- Motion ---------- */
