@@ -429,7 +429,7 @@
 
         <!-- Time entry modal -->
         <template x-if="timeEntryModalOpen">
-            <div class="modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
+            <div class="modal time-entry-modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
                 <div class="task-edit" x-init="htmx.process($el)">
                     <h3>Track time — <span x-text="timeEntryTask?.title"></span></h3>
 
@@ -438,17 +438,24 @@
                         <p class="form-hint">Loading...</p>
                     </div>
 
-                    <hr style="border-color: var(--border); margin: 1rem 0;" />
-                    <h4 style="margin: 0 0 0.5rem;">Add new entry</h4>
+                    <div style="border-top: 1px solid var(--border); margin: .8rem 0; position: relative;">
+                        <span style="position: absolute; top: -0.65rem; left: 50%; transform: translateX(-50%); background: var(--surface); padding: 0 .6rem; font-size: .75rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: .04em;">New Entry</span>
+                    </div>
                     <form hx-post="/api/time-entries" hx-swap="none"
                           x-init="htmx.process($el)"
                           @htmx:after-request="if($event.detail.successful){$el.reset();htmx.ajax('GET','/api/time-entries/by-task/'+timeEntryTask?.id,{target:'#time-entry-list',swap:'outerHTML'});$dispatch('refresh-tasks')}">
-                        <label class="url-import__label">Started at</label>
-                        <input type="datetime-local" name="startedAt" class="form-control" required
-                               x-init="$el.value = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)" />
-                        <label class="url-import__label">Stopped at</label>
-                        <input type="datetime-local" name="stoppedAt" class="form-control" required
-                               x-init="$el.value = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)" />
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: .5rem;">
+                            <div>
+                                <label class="url-import__label">Started at</label>
+                                <input type="datetime-local" name="startedAt" class="form-control" required
+                                       x-init="$el.value = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)" />
+                            </div>
+                            <div>
+                                <label class="url-import__label">Stopped at</label>
+                                <input type="datetime-local" name="stoppedAt" class="form-control" required
+                                       x-init="$el.value = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)" />
+                            </div>
+                        </div>
                         <input type="hidden" name="task" :value="timeEntryTask?.id" />
                         <div class="task-edit__actions">
                             <button type="submit">Add</button>

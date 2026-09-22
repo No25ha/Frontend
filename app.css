@@ -358,11 +358,28 @@ input:focus, select:focus, textarea:focus {
 .time-entry-card__actions { display: flex; gap: .15rem; }
 .time-entry-card__duration { font-weight: 600; color: var(--text); }
 
-.time-entry-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-.time-entry-table th { text-align: left; padding: .4rem .5rem; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
-.time-entry-table td { padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
-.time-entry-table tfoot td { border-bottom: none; border-top: 2px solid var(--border); }
-#time-entry-list { max-height: 300px; overflow-y: auto; }
+.time-entry-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .82rem; }
+.time-entry-table th {
+  text-align: left; padding: .55rem .65rem; font-weight: 700; font-size: .7rem;
+  text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-faint); background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+.time-entry-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+.time-entry-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+.time-entry-table td { padding: .5rem .65rem; border-bottom: 1px solid var(--border); transition: background .12s; }
+.time-entry-table tbody tr:hover td { background: var(--surface-hover); }
+.time-entry-table tfoot td {
+  padding: .6rem .65rem; border-bottom: none; border-top: 2px solid var(--accent);
+  background: var(--accent-soft); font-weight: 700; color: var(--accent);
+}
+.time-entry-table tfoot td:first-child { border-radius: 0 0 0 var(--radius-sm); }
+.time-entry-table tfoot td:last-child { border-radius: 0 0 var(--radius-sm) 0; }
+#time-entry-list { max-height: 320px; overflow-y: auto; border-radius: var(--radius-sm); }
+#time-entry-list::-webkit-scrollbar { width: 5px; }
+#time-entry-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+
+.time-entry-modal .task-edit { width: min(560px, 94vw) !important; }
 
 /* ---------- Inline edit form ---------- */
 .task-edit { display: flex; flex-direction: column; gap: .7rem; }
