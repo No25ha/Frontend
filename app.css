@@ -375,6 +375,8 @@ input:focus, select:focus, textarea:focus {
 }
 .time-entry-table tfoot td:first-child { border-radius: 0 0 0 var(--radius-sm); }
 .time-entry-table tfoot td:last-child { border-radius: 0 0 var(--radius-sm) 0; }
+.time-entry-table td:last-child { text-align: right; }
+.time-entry-table td:last-child .btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; vertical-align: middle; margin-left: 2px; }
 #time-entry-list { max-height: 320px; overflow-y: auto; border-radius: var(--radius-sm); }
 #time-entry-list::-webkit-scrollbar { width: 5px; }
 #time-entry-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
