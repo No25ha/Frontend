@@ -11,9 +11,77 @@
     <script>
     window.API_BASE = 'http://127.0.0.1:1337';
 
+    window._stopTimer = function(docId) {
+      fetch(window.API_BASE + '/api/time-entries/' + docId + '/stop', {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('dailyflow_token'), 'Content-Type': 'application/json' }
+      }).then(function(r) { return r.text(); }).then(function() {
+        document.body.dispatchEvent(new CustomEvent('load-tasks', {bubbles: true}));
+      });
+    };
+
+    window._startTimer = function(taskId) {
+      fetch(window.API_BASE + '/api/time-entries', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('dailyflow_token'), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { task: taskId, startedAt: new Date().toISOString() } })
+      }).then(function(r) { return r.text(); }).then(function() {
+        document.body.dispatchEvent(new CustomEvent('load-tasks', {bubbles: true}));
+      });
+    };
+
+    window._timeCalc = function(f, src) {
+      function toLocal(d) {
+        var p = function(n) { return n < 10 ? '0' + n : '' + n; };
+        return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+      }
+      var si = f.querySelector('[name=startedAt]');
+      var ei = f.querySelector('[name=stoppedAt]');
+      var di = f.querySelector('[name=duration]');
+      var s = si ? si.value : '';
+      var e = ei ? ei.value : '';
+      var dur = di ? Number(di.value) : 0;
+
+      if (src === 'start') f._lastEdited = 'start';
+      if (src === 'stop') f._lastEdited = 'stop';
+
+      if (src === 'dur' && dur > 0) {
+        if (f._lastEdited === 'stop' && e) {
+          si.value = toLocal(new Date(new Date(e).getTime() - dur * 60000));
+        } else if (s) {
+          ei.value = toLocal(new Date(new Date(s).getTime() + dur * 60000));
+        } else if (e) {
+          si.value = toLocal(new Date(new Date(e).getTime() - dur * 60000));
+        }
+      } else if ((src === 'start' || src === 'stop') && s && e) {
+        var diff = Math.round((new Date(e) - new Date(s)) / 60000);
+        di.value = diff > 0 ? diff : '';
+      } else if (src === 'start' && s && dur > 0) {
+        ei.value = toLocal(new Date(new Date(s).getTime() + dur * 60000));
+      } else if (src === 'stop' && e && dur > 0) {
+        si.value = toLocal(new Date(new Date(e).getTime() - dur * 60000));
+      }
+      var err = f.querySelector('[data-time-error]');
+      if (si && ei && si.value && ei.value && new Date(ei.value) < new Date(si.value)) {
+        if (!err) { err = document.createElement('p'); err.setAttribute('data-time-error',''); err.style.cssText='color:#ff6b6b;font-size:.8rem;margin:.3rem 0 0'; ei.parentNode.appendChild(err); }
+        err.textContent = 'Stopped at must be after Started at';
+        ei.setCustomValidity('Stopped at must be after Started at');
+      } else {
+        if (err) err.remove();
+        if (ei) ei.setCustomValidity('');
+      }
+    };
+
     document.addEventListener('htmx:validateUrl', function(e) {
       var allowed = new URL(window.API_BASE).origin;
       if (!e.detail.sameHost && new URL(e.detail.url, location.href).origin !== allowed) e.preventDefault();
+    });
+
+    document.addEventListener('htmx:afterRequest', function(e) {
+      var path = e.detail.pathInfo?.requestPath || '';
+      if (path.indexOf('/api/time-entries') !== -1 && e.detail.successful) {
+        document.body.dispatchEvent(new CustomEvent('load-tasks', {bubbles: true}));
+      }
     });
 
     document.addEventListener('htmx:configRequest', function(e) {
@@ -63,6 +131,7 @@
     </script>
 </head>
 <body x-data="{
+        page: 'tasks',
         selected: null,
         editing: null,
         addModalOpen: false,
@@ -72,6 +141,30 @@
         projectForm: { name: '', description: '', state: 'active' },
         toast: null,
         newTaskProjectName: '',
+        // ---------- Routing ----------
+        initRoute() {
+            const applyHash = () => {
+                const hash = location.hash.replace('#', '') || 'tasks';
+                if (hash === 'projects') {
+                    this.page = 'projects';
+                    this.$nextTick(() => this.$dispatch('load-all-projects'));
+                } else if (hash === 'groups') {
+                    this.page = 'groups';
+                    this.$nextTick(() => this.$dispatch('load-groups'));
+                } else if (hash === 'team') {
+                    this.page = 'team';
+                    this.$nextTick(() => this.$dispatch('load-team'));
+                } else {
+                    this.page = 'tasks';
+                    this.$nextTick(() => this.$dispatch('load-tasks'));
+                }
+            };
+            window.addEventListener('hashchange', () => applyHash());
+            applyHash();
+        },
+        navigate(p) {
+            location.hash = p;
+        },
         // ---------- Auth ----------
         authToken: null,
         authUser: null,
@@ -84,7 +177,10 @@
             if (!this.authToken) { this.authChecking = false; return; }
             this.fetchMe().then((ok) => {
                 this.authChecking = false;
-                if (ok) this.$dispatch('load-projects');
+                if (ok) {
+                    this.$dispatch('load-projects');
+                    this.initRoute();
+                }
             });
         },
         fetchMe() {
@@ -118,7 +214,10 @@
                     this.loginForm = { identifier: '', password: '' };
                     return this.fetchMe().then((ok2) => {
                         this.loginSubmitting = false;
-                        if (ok2) this.$dispatch('load-projects');
+                        if (ok2) {
+                            this.$dispatch('load-projects');
+                            this.initRoute();
+                        }
                     });
                 })
                 .catch(() => {
@@ -147,7 +246,7 @@
             if (!roleType) return false;
             return !!(this._perms[roleType] && this._perms[roleType][permission]);
         },
-        // ---------- Account (change own password) ----------
+        // ---------- Account ----------
         accountModalOpen: false,
         changePasswordForm: { currentPassword: '', password: '', passwordConfirmation: '' },
         changePasswordError: '',
@@ -201,12 +300,13 @@
         selectProject(el) {
             this.selected = { id: el.dataset.id, name: el.dataset.name, count: Number(el.dataset.count) };
             if (this.$refs.taskForm) this.$refs.taskForm.reset();
+            this.navigate('tasks');
             this.$nextTick(() => this.$dispatch('load-tasks'));
         }
     }"
       @open-edit="editing = $event.detail"
       @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
-      @refresh-tasks="if(selected) $dispatch('load-tasks')"
+      @refresh-tasks.window="document.body.dispatchEvent(new CustomEvent('load-tasks',{bubbles:true}))"
       @refresh-projects="$dispatch('load-projects')"
       @show-toast.window="toast = $event.detail; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
       @session-expired.window="clearSession(); toast = 'Your session has expired — please log in again.'; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
@@ -214,6 +314,7 @@
     <div>
         <div class="toast" x-show="toast" x-cloak x-transition x-text="toast" @click="toast = null"></div>
 
+        <!-- ==================== LOGIN ==================== -->
         <div class="login-screen" x-show="!authChecking && !authToken" x-cloak>
             <form class="login-card" @submit.prevent="login()">
                 <div class="brand-mark" aria-hidden="true">
@@ -222,101 +323,149 @@
                     </svg>
                 </div>
                 <h1>DailyFlow</h1>
-                <p class="subtitle">Sign in to continue</p>
+                <p class="login-subtitle">Sign in to continue</p>
                 <div class="login-card__error" x-show="loginError" x-cloak x-text="loginError"></div>
                 <input type="text" name="identifier" class="form-control" placeholder="Email or username"
                        x-model="loginForm.identifier" required autocomplete="username" />
-                <input type="password" name="password" class="form-control" placeholder="Password"
-                       x-model="loginForm.password" required autocomplete="current-password" />
+                <div style="position:relative">
+                    <input type="password" name="password" class="form-control" placeholder="Password"
+                           x-model="loginForm.password" required autocomplete="current-password" style="padding-right:2.5rem" />
+                    <button type="button" style="position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem;padding:0"
+                            onclick="var i=this.previousElementSibling;if(i.type==='password'){i.type='text';this.textContent='🙈'}else{i.type='password';this.textContent='👁'}">👁</button>
+                </div>
                 <button type="submit" :disabled="loginSubmitting" x-text="loginSubmitting ? 'Signing in…' : 'Sign in'"></button>
             </form>
         </div>
 
+        <!-- ==================== APP ==================== -->
         <div x-show="authToken" x-cloak>
-            <header>
-                <div class="brand-mark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <div>
+            <!-- ===== NAVBAR ===== -->
+            <nav class="navbar">
+                <div class="navbar__brand">
+                    <div class="brand-mark" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
                     <h1>DailyFlow</h1>
-                    <p class="subtitle">
-                        Strapi returns HTML · HTMX handles requests · Alpine handles UI state
-                    </p>
+                </div>
+                <div class="navbar__links">
+                    <button type="button" class="nav-link" :class="{ 'is-active': page === 'tasks' }" @click="selected = null; navigate('tasks')">
+                        Tasks
+                    </button>
+                    <button type="button" class="nav-link" :class="{ 'is-active': page === 'projects' }" @click="navigate('projects')">
+                        Projects
+                    </button>
+                    <button type="button" class="nav-link" :class="{ 'is-active': page === 'groups' }" x-show="isManager()" @click="navigate('groups')">
+                        Groups
+                    </button>
+                    <button type="button" class="nav-link" :class="{ 'is-active': page === 'team' }" x-show="isManager()" @click="navigate('team')">
+                        Team
+                    </button>
                 </div>
                 <div class="header-user">
                     <span x-text="authUser?.username"></span>
                     <span class="badge" x-show="authUser?.role?.name" x-text="authUser?.role?.name"></span>
-                    <button type="button" class="btn-ghost" x-show="isManager()"
-                        hx-get="/api/groups/modal" hx-target="#modal-container" hx-swap="innerHTML">Groups</button>
-                    <button type="button" class="btn-ghost" x-show="isManager()"
-                        hx-get="/api/team/modal" hx-target="#modal-container" hx-swap="innerHTML">Team</button>
                     <button type="button" class="btn-ghost" @click="openAccountModal()">Account</button>
                     <button type="button" class="btn-ghost" @click="logout()">Log out</button>
                 </div>
-            </header>
-            <div class="layout">
-                <aside class="panel">
-                    <div class="section-head section-head--projects">
-                        <h2>Projects</h2>
-                        <button type="button" class="btn-icon" x-show="can('project.create')"
-                            hx-get="/api/projects/create-form" hx-target="#project-create-modal" hx-swap="innerHTML"
-                            title="Add project">＋</button>
-                    </div>
-                    <form id="project-filters" class="project-toolbar"
-                          hx-get="/api/projects" hx-target="#projects" hx-swap="innerHTML"
-                          hx-trigger="load-projects from:body, input changed delay:400ms from:find input, change from:find select">
-                        <input type="search" name="filters[name][$containsi]" class="form-control project-toolbar__search" placeholder="Search projects…" />
+            </nav>
+
+            <!-- ===== PAGE: PROJECTS ===== -->
+            <div class="main-content" x-show="page === 'projects'" x-cloak>
+                <div class="page-header">
+                    <h2 class="page-title">Projects</h2>
+                    <button type="button" class="btn-primary-sm" x-show="can('project.create')"
+                        hx-get="/api/projects/create-form" hx-target="#project-create-modal" hx-swap="innerHTML">
+                        + New Project
+                    </button>
+                </div>
+
+                <form id="project-filters" class="filter-bar"
+                      hx-get="/api/projects" hx-target="#projects" hx-swap="innerHTML"
+                      hx-trigger="load-all-projects from:body, input changed delay:400ms from:find input, change from:find select">
+                    <input type="search" name="filters[name][$containsi]" class="form-control filter-bar__search" placeholder="Search projects…" />
+                    <select name="filters[state][$eq]" class="form-select">
+                        <option value="">All states</option>
+                        <option value="active">Active</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                </form>
+
+                <div id="projects" class="project-grid">
+                    Loading projects...
+                </div>
+            </div>
+
+            <!-- ===== PAGE: GROUPS ===== -->
+            <div class="main-content" x-show="page === 'groups'" x-cloak>
+                <div class="page-header">
+                    <h2 class="page-title">Groups</h2>
+                    <button type="button" class="btn-primary-sm"
+                        hx-get="/api/groups/modal?view=create-form" hx-target="#modal-container" hx-swap="innerHTML">
+                        + New Group
+                    </button>
+                </div>
+                <div id="groups-page-content"
+                     hx-get="/api/groups/modal?view=page" hx-target="#groups-page-content" hx-swap="innerHTML"
+                     hx-trigger="load-groups from:body">
+                    Loading groups...
+                </div>
+            </div>
+
+            <!-- ===== PAGE: TEAM ===== -->
+            <div class="main-content" x-show="page === 'team'" x-cloak>
+                <div class="page-header">
+                    <h2 class="page-title">Team</h2>
+                    <button type="button" class="btn-primary-sm"
+                        hx-get="/api/team/modal?view=create-form" hx-target="#modal-container" hx-swap="innerHTML">
+                        + New Member
+                    </button>
+                </div>
+                <div id="team-page-content"
+                     hx-get="/api/team/modal?view=page" hx-target="#team-page-content" hx-swap="innerHTML"
+                     hx-trigger="load-team from:body">
+                    Loading team...
+                </div>
+            </div>
+
+            <!-- ===== PAGE: TASKS ===== -->
+            <div class="main-content" x-show="page === 'tasks'" x-cloak>
+                <div>
+                    <header class="detail__head">
+                        <div>
+                            <h2 class="detail__title" x-text="selected ? selected.name : 'All Tasks'"></h2>
+                            <span class="badge" x-show="selected" x-text="(selected?.count || 0) + ' tasks'"></span>
+                        </div>
+                        <button type="button" class="btn-primary-sm" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">+ New Task</button>
+                    </header>
+                    <form id="task-filters" x-ref="taskForm" class="filter-bar"
+                          hx-get="/api/tasks" hx-target="#tasks" hx-swap="innerHTML"
+                          hx-trigger="load-tasks from:body, input changed delay:400ms from:find input, change from:find select">
+                        <template x-if="selected"><input type="hidden" name="filters[project][documentId][$eq]" :value="selected?.id" /></template>
+                        <input type="search" name="filters[title][$containsi]" class="form-control filter-bar__search" placeholder="Search tasks…" />
+                        <select name="filters[priority][$eq]" class="form-select">
+                            <option value="">All priorities</option>
+                            <option value="low">Low priority</option>
+                            <option value="high">High priority</option>
+                        </select>
                         <select name="filters[state][$eq]" class="form-select">
                             <option value="">All states</option>
+                            <option value="pending">Pending</option>
                             <option value="active">Active</option>
-                            <option value="archived">Archived</option>
+                            <option value="paused">Paused</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                        <select name="sort" class="form-select">
+                            <option value="">Latest activity</option>
+                            <option value="createdAt:desc">Newest first</option>
+                            <option value="createdAt:asc">Oldest first</option>
+                            <option value="priority:desc">By priority</option>
+                            <option value="plannedDate:asc">By planned date</option>
                         </select>
                     </form>
-                    <div id="projects" class="project-list">
-                        Loading projects...
-                    </div>
-                </aside>
-                <main class="panel">
-                    <p x-show="!selected" class="empty placeholder">
-                        ← Select a project to see its tasks.
-                    </p>
-                    <div x-show="selected" x-cloak>
-                        <header class="detail__head">
-                            <div>
-                                <h2 class="detail__title" x-text="selected?.name"></h2>
-                                <span class="badge" x-text="(selected?.count || 0) + ' tasks'"></span>
-                            </div>
-                            <button type="button" class="btn-icon" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">➕</button>
-                        </header>
-                        <form id="task-filters" x-ref="taskForm" class="task-toolbar"
-                              hx-get="/api/tasks" hx-target="#tasks" hx-swap="innerHTML"
-                              hx-trigger="load-tasks from:body, input changed delay:400ms from:find input, change from:find select">
-                            <input type="hidden" name="filters[project][documentId][$eq]" :value="selected?.id" />
-                            <input type="search" name="filters[title][$containsi]" class="form-control task-toolbar__search" placeholder="Search tasks…" />
-                            <select name="filters[priority][$eq]" class="form-select">
-                                <option value="">All priorities</option>
-                                <option value="low">Low priority</option>
-                                <option value="high">High priority</option>
-                            </select>
-                            <select name="filters[state][$eq]" class="form-select">
-                                <option value="">All states</option>
-                                <option value="pending">Pending</option>
-                                <option value="active">Active</option>
-                                <option value="paused">Paused</option>
-                                <option value="completed">Completed</option>
-                            </select>
-                            <select name="sort" class="form-select">
-                                <option value="createdAt:desc">Newest first</option>
-                                <option value="createdAt:asc">Oldest first</option>
-                                <option value="priority:desc">By priority</option>
-                                <option value="plannedDate:asc">By planned date</option>
-                            </select>
-                        </form>
-                        <div id="tasks" class="task-list"></div>
-                    </div>
-                </main>
+                    <div id="tasks" class="task-list"></div>
+                </div>
             </div>
         </div>
 
@@ -325,7 +474,7 @@
         <div id="project-create-modal"></div>
 
 
-        <!-- Account modal (change own password) -->
+        <!-- Account modal -->
         <template x-if="accountModalOpen">
             <div class="modal" @click.self="accountModalOpen = false">
                 <form class="task-edit" @submit.prevent="changePassword()">
@@ -346,7 +495,7 @@
         </template>
 
 
-        <!-- Add task modal (from URL) -->
+        <!-- Add task modal -->
         <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
             <form class="task-edit" hx-post="/api/tasks/from-url" hx-swap="none"
                 @htmx:after-request="if ($event.detail.elt === $el && $event.detail.successful) { addModalOpen = false; $el.reset(); newTaskProjectName = ''; $dispatch('refresh-tasks'); $dispatch('refresh-projects') }">
@@ -440,21 +589,28 @@
 
                     <form data-time-form hx-post="/api/time-entries" hx-swap="none"
                           x-init="htmx.process($el)"
-                          @htmx:after-request="if($event.detail.successful){$el.reset();$el.setAttribute('hx-post','/api/time-entries');$el.removeAttribute('hx-put');htmx.process($el);const now=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);$el.querySelector('[name=startedAt]').value=now;$el.querySelector('[name=stoppedAt]').value=now;$el.querySelector('[data-form-label]').textContent='New Entry';$el.querySelector('[data-submit-btn]').textContent='Add';var ce=$el.querySelector('[data-cancel-edit]');if(ce)ce.remove();htmx.ajax('GET','/api/time-entries/by-task/'+timeEntryTask?.id,{target:'#time-entry-list',swap:'outerHTML'});$dispatch('refresh-tasks')}">
+                                                    @htmx:after-request="if($event.detail.successful){$el.reset();$el.setAttribute('hx-post','/api/time-entries');$el.removeAttribute('hx-put');htmx.process($el);$el.querySelector('[name=startedAt]').value='';$el.querySelector('[name=stoppedAt]').value='';$el.querySelector('[name=duration]').value='';$el._lastEdited=null;$el.querySelector('[data-form-label]').textContent='New Entry';$el.querySelector('[data-submit-btn]').textContent='Add';var ce=$el.querySelector('[data-cancel-edit]');if(ce)ce.remove();htmx.ajax('GET','/api/time-entries/by-task/'+timeEntryTask?.id,{target:'#time-entry-list',swap:'outerHTML'});$dispatch('refresh-tasks')}">
                         <div style="border-top: 1px solid var(--border); margin: 0 0 .8rem; padding-top: .8rem; position: relative;">
                             <span data-form-label style="position: absolute; top: -0.65rem; left: 50%; transform: translateX(-50%); background: var(--surface); padding: 0 .6rem; font-size: .75rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: .04em;">New Entry</span>
                         </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: .5rem;">
                             <div>
                                 <label class="url-import__label">Started at</label>
-                                <input type="datetime-local" name="startedAt" class="form-control" required
-                                       x-init="$el.value = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)" />
+                                <input type="datetime-local" name="startedAt" class="form-control"
+                                       x-on:input="window._timeCalc($el.closest('form'), 'start')"
+                                       x-on:change="window._timeCalc($el.closest('form'), 'start')" />
                             </div>
                             <div>
                                 <label class="url-import__label">Stopped at</label>
-                                <input type="datetime-local" name="stoppedAt" class="form-control" required
-                                       x-init="$el.value = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)" />
+                                <input type="datetime-local" name="stoppedAt" class="form-control"
+                                       x-on:input="window._timeCalc($el.closest('form'), 'stop')"
+                                       x-on:change="window._timeCalc($el.closest('form'), 'stop')" />
                             </div>
+                        </div>
+                        <div>
+                            <label class="url-import__label">Duration (minutes)</label>
+                            <input type="number" name="duration" class="form-control" min="1" placeholder="Auto-calculated"
+                                   x-on:input="window._timeCalc($el.closest('form'), 'dur')" />
                         </div>
                         <input type="hidden" name="task" :value="timeEntryTask?.id" />
                         <div class="task-edit__actions" style="margin-top: .5rem;">
@@ -466,7 +622,7 @@
             </div>
         </template>
 
-        <!-- Container for HTMX-loaded modals (team, project edit) -->
+        <!-- Container for HTMX-loaded modals -->
         <div id="modal-container"></div>
     </div>
 </body>
