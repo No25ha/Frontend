@@ -374,6 +374,7 @@
                         this.loginSubmitting = false;
                         if (ok2) {
                             this.$dispatch('load-projects');
+                            location.hash = 'home';
                             this.initRoute();
                         }
                     });
