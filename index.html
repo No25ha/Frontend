@@ -108,6 +108,89 @@
       window._sortPinnedCards(listSel, cardSel, type);
     };
 
+    window._hpSortTable = function(th) {
+      var table = th.closest('table');
+      var tbody = table.querySelector('tbody');
+      var col = th.dataset.col;
+      var asc = th.dataset.sortDir !== 'asc';
+      th.closest('tr').querySelectorAll('th[data-col]').forEach(function(t) {
+        t.dataset.sortDir = '';
+        var ind = t.querySelector('.hp-sort-ind');
+        if (ind) ind.textContent = '⇅';
+      });
+      th.dataset.sortDir = asc ? 'asc' : 'desc';
+      var ind = th.querySelector('.hp-sort-ind');
+      if (ind) ind.textContent = asc ? ' ↑' : ' ↓';
+
+      var key = 'sort' + col.charAt(0).toUpperCase() + col.slice(1);
+      var rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort(function(a, b) {
+        var av = a.dataset[key] || '', bv = b.dataset[key] || '';
+        var an = parseFloat(av), bn = parseFloat(bv);
+        var numeric = av !== '' && bv !== '' && !isNaN(an) && !isNaN(bn);
+        if (numeric) return asc ? an - bn : bn - an;
+        if (av < bv) return asc ? -1 : 1;
+        if (av > bv) return asc ? 1 : -1;
+        return 0;
+      });
+      rows.forEach(function(r) { tbody.appendChild(r); });
+    };
+
+    window._hpDeleteTask = function(id) {
+      if (!window.confirm('Are you sure you want to delete this task?')) return;
+      var token = localStorage.getItem('dailyflow_token');
+      fetch(window.API_BASE + '/api/tasks/' + id, {
+        method: 'DELETE',
+        headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+      }).then(function(res) {
+        if (res.ok || res.status === 204) {
+          document.body.dispatchEvent(new CustomEvent('load-homepage', { bubbles: true }));
+        } else {
+          res.json().then(function(d) {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: (d && d.error && d.error.message) || 'Delete failed (' + res.status + ').' }));
+          }).catch(function() {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Delete failed (' + res.status + ').' }));
+          });
+        }
+      }).catch(function() {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Could not reach the server.' }));
+      });
+    };
+
+    window._hpUpdateTask = function(form, id) {
+      var token = localStorage.getItem('dailyflow_token');
+      var payload = {};
+      new FormData(form).forEach(function(v, k) { if (v !== '' && k !== 'project') payload[k] = v; });
+      fetch(window.API_BASE + '/api/tasks/' + id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(payload)
+      }).then(function(res) {
+        if (res.ok) {
+          document.body.dispatchEvent(new CustomEvent('open-edit', { bubbles: true, detail: null }));
+          document.body.dispatchEvent(new CustomEvent('load-homepage', { bubbles: true }));
+        } else {
+          res.json().then(function(d) {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: (d && d.error && d.error.message) || 'Update failed (' + res.status + ').' }));
+          }).catch(function() {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Update failed (' + res.status + ').' }));
+          });
+        }
+      }).catch(function() {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Could not reach the server.' }));
+      });
+    };
+
+    window._hpEditTask = function(btn) {
+      document.body.dispatchEvent(new CustomEvent('open-edit', { bubbles: true, detail: {
+        id: btn.dataset.id,
+        title: btn.dataset.title,
+        priority: btn.dataset.priority,
+        state: btn.dataset.state,
+        assignedTo: btn.dataset.assignedTo || ''
+      }}));
+    };
+
     window._openProject = function(docId, name, count) {
       window.dispatchEvent(new CustomEvent('open-project', { detail: { id: docId, name: name, count: Number(count) } }));
     };
@@ -122,6 +205,12 @@
       var path = e.detail.pathInfo?.requestPath || '';
       if (path.indexOf('/api/time-entries') !== -1 && e.detail.successful) {
         document.body.dispatchEvent(new CustomEvent('load-tasks', {bubbles: true}));
+      }
+      var verb = (e.detail.requestConfig?.verb || '').toLowerCase();
+      if (/\/api\/tasks\/[^/]+$/.test(path) && (verb === 'put' || verb === 'delete') && e.detail.successful) {
+        if (document.getElementById('hp-projects')) {
+          document.body.dispatchEvent(new CustomEvent('load-homepage', {bubbles: true}));
+        }
       }
     });
 
@@ -139,6 +228,7 @@
     document.addEventListener('htmx:beforeSwap', function(e) {
       if (e.detail.xhr.status === 204) { e.detail.shouldSwap = true; e.detail.isError = false; }
     });
+
 
     document.addEventListener('htmx:responseError', function(e) {
       var xhr = e.detail.xhr;
@@ -687,7 +777,8 @@
                       :hx-put="'/api/tasks/' + editing.id"
                       :hx-target="'#task-' + editing.id"
                       hx-swap="outerHTML"
-                      x-init="htmx.process($el)"
+                      x-init="if (page !== 'home') htmx.process($el)"
+                      @submit="page === 'home' && ($event.preventDefault(), _hpUpdateTask($el, editing.id))"
                       @htmx:after-request="editing = null">
                     <h3>Edit task</h3>
                     <input type="text" name="title" class="form-control" :value="editing.title" required />
