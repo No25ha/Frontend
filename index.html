@@ -30,9 +30,12 @@
       }
     };
 
+    var _SVG_PIN = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+    var _SVG_PIN_FILLED = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+
     window._pinProjectSection = function(id, btn) {
       var pinned = window._pins.toggle('projects', id);
-      btn.textContent = pinned ? '📌' : '📍';
+      btn.innerHTML = pinned ? _SVG_PIN_FILLED : _SVG_PIN;
       btn.title = pinned ? 'Unpin project' : 'Pin project';
       var section = btn.closest('.hp-project-group');
       if (section) section.classList.toggle('is-pinned', pinned);
@@ -56,7 +59,7 @@
         var pinned = window._pins.isPinned('projects', id);
         section.classList.toggle('is-pinned', pinned);
         var btn = section.querySelector('.hp-section-pin');
-        if (btn) { btn.textContent = pinned ? '📌' : '📍'; btn.title = pinned ? 'Unpin project' : 'Pin project'; }
+        if (btn) { btn.innerHTML = pinned ? _SVG_PIN_FILLED : _SVG_PIN; btn.title = pinned ? 'Unpin project' : 'Pin project'; }
       });
       sections.sort(function(a, b) {
         var ap = window._pins.isPinned('projects', a.dataset.projectId) ? 0 : 1;
@@ -68,7 +71,7 @@
 
     window._pinTask = function(id, btn) {
       var pinned = window._pins.toggle('tasks', id);
-      btn.textContent = pinned ? '📌' : '📍';
+      btn.innerHTML = pinned ? _SVG_PIN_FILLED : _SVG_PIN;
       btn.title = pinned ? 'Unpin task' : 'Pin task';
       btn.closest('.task-card').classList.toggle('is-pinned', pinned);
       window._sortPinnedCards('.task-list', '.task-card', 'tasks');
@@ -76,7 +79,7 @@
 
     window._pinProject = function(id, btn) {
       var pinned = window._pins.toggle('projects', id);
-      btn.textContent = pinned ? '📌' : '📍';
+      btn.innerHTML = pinned ? _SVG_PIN_FILLED : _SVG_PIN;
       btn.title = pinned ? 'Unpin project' : 'Pin project';
       btn.closest('.project-card').classList.toggle('is-pinned', pinned);
       window._sortPinnedCards('.project-grid', '.project-card', 'projects');
@@ -100,7 +103,7 @@
         var pinned = window._pins.isPinned(type, id);
         card.classList.toggle('is-pinned', pinned);
         var btn = card.querySelector('.btn-pin');
-        if (btn) { btn.textContent = pinned ? '📌' : '📍'; btn.title = pinned ? 'Unpin' : 'Pin'; }
+        if (btn) { btn.innerHTML = pinned ? _SVG_PIN_FILLED : _SVG_PIN; btn.title = pinned ? 'Unpin' : 'Pin'; }
       });
       window._sortPinnedCards(listSel, cardSel, type);
     };
@@ -452,9 +455,11 @@
                 <div style="position:relative">
                     <input :type="showLoginPassword ? 'text' : 'password'" name="password" class="form-control" placeholder="Password"
                            x-model="loginForm.password" required autocomplete="current-password" style="padding-right:2.5rem" />
-                    <button type="button" style="position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem;padding:0"
-                            @click="showLoginPassword = !showLoginPassword"
-                            x-text="showLoginPassword ? '🙈' : '👁'"></button>
+                    <button type="button" style="position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:0;display:inline-flex;align-items:center"
+                            @click="showLoginPassword = !showLoginPassword" :aria-label="showLoginPassword ? 'Hide password' : 'Show password'">
+                        <svg x-show="!showLoginPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg x-show="showLoginPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                    </button>
                 </div>
                 <button type="submit" :disabled="loginSubmitting" x-text="loginSubmitting ? 'Signing in…' : 'Sign in'"></button>
             </form>
