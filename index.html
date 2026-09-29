@@ -11,6 +11,124 @@
     <script>
     window.API_BASE = 'http://127.0.0.1:1337';
 
+    // ---- Pin helpers (localStorage, per-user-per-browser) ----
+    window._pins = {
+      _key: function(type) { return 'df_pins_' + type; },
+      get: function(type) {
+        try { return new Set(JSON.parse(localStorage.getItem(window._pins._key(type)) || '[]')); }
+        catch(e) { return new Set(); }
+      },
+      save: function(type, set) {
+        try { localStorage.setItem(window._pins._key(type), JSON.stringify([...set])); } catch(e) {}
+      },
+      isPinned: function(type, id) { return window._pins.get(type).has(id); },
+      toggle: function(type, id) {
+        var s = window._pins.get(type);
+        if (s.has(id)) { s.delete(id); } else { s.add(id); }
+        window._pins.save(type, s);
+        return s.has(id);
+      }
+    };
+
+    window._pinProjectSection = function(id, btn) {
+      var pinned = window._pins.toggle('projects', id);
+      btn.textContent = pinned ? '📌' : '📍';
+      btn.title = pinned ? 'Unpin project' : 'Pin project';
+      var section = btn.closest('.hp-project-group');
+      if (section) section.classList.toggle('is-pinned', pinned);
+      var container = document.getElementById('hp-projects');
+      if (!container) return;
+      var sections = Array.from(container.querySelectorAll('.hp-project-group'));
+      sections.sort(function(a, b) {
+        var ap = window._pins.isPinned('projects', a.dataset.projectId) ? 0 : 1;
+        var bp = window._pins.isPinned('projects', b.dataset.projectId) ? 0 : 1;
+        return ap - bp;
+      });
+      sections.forEach(function(s) { container.appendChild(s); });
+    };
+
+    window._pinTaskRow = function(id, btn) {
+      var pinned = window._pins.toggle('tasks', id);
+      btn.textContent = pinned ? '📌' : '📍';
+      btn.title = pinned ? 'Unpin task' : 'Pin task';
+      var row = btn.closest('tr');
+      if (row) row.classList.toggle('is-pinned', pinned);
+      window._sortPinnedRows(btn.closest('tbody'), 'tasks');
+    };
+
+    window._sortPinnedRows = function(tbody, type) {
+      if (!tbody) return;
+      var rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort(function(a, b) {
+        var ap = window._pins.isPinned(type, a.dataset.id) ? 0 : 1;
+        var bp = window._pins.isPinned(type, b.dataset.id) ? 0 : 1;
+        return ap - bp;
+      });
+      rows.forEach(function(r) { tbody.appendChild(r); });
+    };
+
+    window._applyPinStatesToHomepage = function() {
+      var container = document.getElementById('hp-projects');
+      if (!container) return;
+      var sections = Array.from(container.querySelectorAll('.hp-project-group'));
+      sections.forEach(function(section) {
+        var id = section.dataset.projectId;
+        var pinned = window._pins.isPinned('projects', id);
+        section.classList.toggle('is-pinned', pinned);
+        var btn = section.querySelector('.hp-section-pin');
+        if (btn) { btn.textContent = pinned ? '📌' : '📍'; btn.title = pinned ? 'Unpin project' : 'Pin project'; }
+      });
+      sections.sort(function(a, b) {
+        var ap = window._pins.isPinned('projects', a.dataset.projectId) ? 0 : 1;
+        var bp = window._pins.isPinned('projects', b.dataset.projectId) ? 0 : 1;
+        return ap - bp;
+      });
+      sections.forEach(function(s) { container.appendChild(s); });
+    };
+
+    window._pinTask = function(id, btn) {
+      var pinned = window._pins.toggle('tasks', id);
+      btn.textContent = pinned ? '📌' : '📍';
+      btn.title = pinned ? 'Unpin task' : 'Pin task';
+      btn.closest('.task-card').classList.toggle('is-pinned', pinned);
+      window._sortPinnedCards('.task-list', '.task-card', 'tasks');
+    };
+
+    window._pinProject = function(id, btn) {
+      var pinned = window._pins.toggle('projects', id);
+      btn.textContent = pinned ? '📌' : '📍';
+      btn.title = pinned ? 'Unpin project' : 'Pin project';
+      btn.closest('.project-card').classList.toggle('is-pinned', pinned);
+      window._sortPinnedCards('.project-grid', '.project-card', 'projects');
+    };
+
+    window._sortPinnedCards = function(listSel, cardSel, type) {
+      var list = document.querySelector(listSel);
+      if (!list) return;
+      var cards = Array.from(list.querySelectorAll(cardSel));
+      cards.sort(function(a, b) {
+        var ap = window._pins.isPinned(type, a.dataset.id) ? 0 : 1;
+        var bp = window._pins.isPinned(type, b.dataset.id) ? 0 : 1;
+        return ap - bp;
+      });
+      cards.forEach(function(c) { list.appendChild(c); });
+    };
+
+    window._applyPinStates = function(listSel, cardSel, type) {
+      document.querySelectorAll(listSel + ' ' + cardSel).forEach(function(card) {
+        var id = card.dataset.id;
+        var pinned = window._pins.isPinned(type, id);
+        card.classList.toggle('is-pinned', pinned);
+        var btn = card.querySelector('.btn-pin');
+        if (btn) { btn.textContent = pinned ? '📌' : '📍'; btn.title = pinned ? 'Unpin' : 'Pin'; }
+      });
+      window._sortPinnedCards(listSel, cardSel, type);
+    };
+
+    window._openProject = function(docId, name, count) {
+      window.dispatchEvent(new CustomEvent('open-project', { detail: { id: docId, name: name, count: Number(count) } }));
+    };
+
     window._stopTimer = function(docId) {
       fetch(window.API_BASE + '/api/time-entries/' + docId + '/stop', {
         method: 'PUT',
@@ -128,10 +246,47 @@
     document.addEventListener('htmx:sendError', function() {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Could not reach the server. Check your connection.' }));
     });
+
+    document.addEventListener('htmx:afterSettle', function(e) {
+      var target = e.detail.target;
+      if (!target) return;
+      if (target.id === 'tasks' || target.closest && target.closest('#tasks')) {
+        window._applyPinStates('.task-list', '.task-card', 'tasks');
+      }
+      if (target.id === 'projects' || target.closest && target.closest('#projects')) {
+        window._applyPinStates('.project-grid', '.project-card', 'projects');
+      }
+      if (target.id === 'homepage' || target.closest && target.closest('#homepage')) {
+        window._applyPinStatesToHomepage();
+      }
+    });
+
+    // Multi-select dropdown
+    window.msToggle = function(btn) {
+      var wrap = btn.closest('.ms');
+      var panel = wrap.querySelector('.ms__panel');
+      var isOpen = !panel.hidden;
+      document.querySelectorAll('.ms__panel').forEach(function(p) { p.hidden = true; });
+      document.querySelectorAll('.ms__trigger').forEach(function(b) { b.classList.remove('is-open'); });
+      if (!isOpen) { panel.hidden = false; btn.classList.add('is-open'); }
+    };
+    window.msCbChange = function(cb) {
+      var wrap = cb.closest('.ms');
+      var btn = wrap.querySelector('.ms__trigger');
+      var checked = wrap.querySelectorAll('input[type=checkbox]:checked');
+      var placeholder = btn.dataset.placeholder || 'Select...';
+      btn.querySelector('.ms__label').textContent = checked.length ? checked.length + ' selected' : placeholder;
+    };
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.ms')) {
+        document.querySelectorAll('.ms__panel').forEach(function(p) { p.hidden = true; });
+        document.querySelectorAll('.ms__trigger').forEach(function(b) { b.classList.remove('is-open'); });
+      }
+    });
     </script>
 </head>
 <body x-data="{
-        page: 'tasks',
+        page: 'home',
         selected: null,
         editing: null,
         addModalOpen: false,
@@ -144,7 +299,7 @@
         // ---------- Routing ----------
         initRoute() {
             const applyHash = () => {
-                const hash = location.hash.replace('#', '') || 'tasks';
+                const hash = location.hash.replace('#', '') || 'home';
                 if (hash === 'projects') {
                     this.page = 'projects';
                     this.$nextTick(() => this.$dispatch('load-all-projects'));
@@ -154,9 +309,12 @@
                 } else if (hash === 'team') {
                     this.page = 'team';
                     this.$nextTick(() => this.$dispatch('load-team'));
-                } else {
+                } else if (hash === 'tasks') {
                     this.page = 'tasks';
                     this.$nextTick(() => this.$dispatch('load-tasks'));
+                } else {
+                    this.page = 'home';
+                    this.$nextTick(() => this.$dispatch('load-homepage'));
                 }
             };
             window.addEventListener('hashchange', () => applyHash());
@@ -310,6 +468,7 @@
       @refresh-projects="$dispatch('load-projects')"
       @show-toast.window="toast = $event.detail; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
       @session-expired.window="clearSession(); toast = 'Your session has expired — please log in again.'; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => toast = null, 4500)"
+      @open-project.window="selected = $event.detail; navigate('tasks'); $nextTick(() => $dispatch('load-tasks'))"
       x-init="initAuth()">
     <div>
         <div class="toast" x-show="toast" x-cloak x-transition x-text="toast" @click="toast = null"></div>
@@ -350,8 +509,8 @@
                     <h1>DailyFlow</h1>
                 </div>
                 <div class="navbar__links">
-                    <button type="button" class="nav-link" :class="{ 'is-active': page === 'tasks' }" @click="selected = null; navigate('tasks')">
-                        Tasks
+                    <button type="button" class="nav-link" :class="{ 'is-active': page === 'home' }" @click="navigate('home')">
+                        Home
                     </button>
                     <button type="button" class="nav-link" :class="{ 'is-active': page === 'projects' }" @click="navigate('projects')">
                         Projects
@@ -370,6 +529,17 @@
                     <button type="button" class="btn-ghost" @click="logout()">Log out</button>
                 </div>
             </nav>
+
+            <!-- ===== PAGE: HOME ===== -->
+            <div class="main-content main-content--home" x-show="page === 'home'" x-cloak>
+                <div id="homepage"
+                     hx-get="/api/homepage"
+                     hx-trigger="load-homepage from:body"
+                     hx-swap="innerHTML"
+                     class="homepage-wrap">
+                    <div class="hp-loading">Loading...</div>
+                </div>
+            </div>
 
             <!-- ===== PAGE: PROJECTS ===== -->
             <div class="main-content" x-show="page === 'projects'" x-cloak>
@@ -430,10 +600,16 @@
             </div>
 
             <!-- ===== PAGE: TASKS ===== -->
+        </div>
+
+
+        <!-- New project modal -->
+        <!-- ===== PAGE: TASKS (project drill-down only) ===== -->
             <div class="main-content" x-show="page === 'tasks'" x-cloak>
                 <div>
                     <header class="detail__head">
                         <div>
+                            <button type="button" class="btn-ghost" @click="selected = null; navigate('home')" style="margin-right:.5rem">← Back</button>
                             <h2 class="detail__title" x-text="selected ? selected.name : 'All Tasks'"></h2>
                             <span class="badge" x-show="selected" x-text="(selected?.count || 0) + ' tasks'"></span>
                         </div>
@@ -467,10 +643,7 @@
                     <div id="tasks" class="task-list"></div>
                 </div>
             </div>
-        </div>
 
-
-        <!-- New project modal -->
         <div id="project-create-modal"></div>
 
 
@@ -611,6 +784,10 @@
                             <label class="url-import__label">Duration (minutes)</label>
                             <input type="number" name="duration" class="form-control" min="1" placeholder="Auto-calculated"
                                    x-on:input="window._timeCalc($el.closest('form'), 'dur')" />
+                        </div>
+                        <div>
+                            <label class="url-import__label">Comment</label>
+                            <input type="text" name="comment" class="form-control" placeholder="Optional note..." />
                         </div>
                         <input type="hidden" name="task" :value="timeEntryTask?.id" />
                         <div class="task-edit__actions" style="margin-top: .5rem;">
