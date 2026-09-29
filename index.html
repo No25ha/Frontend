@@ -136,6 +136,54 @@
       rows.forEach(function(r) { tbody.appendChild(r); });
     };
 
+    var _RECENT_KEY = 'df_recent_tasks';
+    var _RECENT_MAX = 8;
+
+    window._getRecentTasks = function() {
+      try { return JSON.parse(localStorage.getItem(_RECENT_KEY) || '[]'); } catch(e) { return []; }
+    };
+
+    window._renderRecentTasks = function() {
+      var body = document.getElementById('hp-recent-body');
+      if (!body) return;
+      var list = window._getRecentTasks();
+      if (!list.length) {
+        body.innerHTML = '<p class="hp-person__empty">No recent tasks yet</p>';
+        return;
+      }
+      var html = '<ul class="hp-recent-list">';
+      list.forEach(function(t) {
+        html += '<li class="hp-recent-item" onclick="window._hpTrackRecentTask(' + JSON.stringify(t).replace(/"/g, '&quot;') + ');window._openProject(\'' + (t.projectDocId||'').replace(/'/g,"\\'") + '\',\'' + (t.projectName||'').replace(/'/g,"\\'") + '\',0)">'
+          + '<span class="hp-recent-item__title">' + (t.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>'
+          + '<span class="hp-recent-item__project">' + (t.projectName || '').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>'
+          + '</li>';
+      });
+      html += '</ul>';
+      body.innerHTML = html;
+    };
+
+    window._hpTrackRecentTask = function(task) {
+      if (!task || !task.id) return;
+      try {
+        var list = window._getRecentTasks().filter(function(t) { return t.id !== task.id; });
+        list.unshift({ id: task.id, title: task.title, projectDocId: task.projectDocId, projectName: task.projectName });
+        if (list.length > _RECENT_MAX) list = list.slice(0, _RECENT_MAX);
+        localStorage.setItem(_RECENT_KEY, JSON.stringify(list));
+        window.dispatchEvent(new CustomEvent('recent-tasks-updated'));
+        window._renderRecentTasks();
+      } catch(e) {}
+    };
+
+    window._hpTrackTaskCard = function(card) {
+      if (!card) return;
+      window._hpTrackRecentTask({
+        id: card.dataset.id,
+        title: card.dataset.title,
+        projectDocId: card.dataset.projectId || '',
+        projectName: card.dataset.projectName || ''
+      });
+    };
+
     window._hpDeleteTask = function(id) {
       if (!window.confirm('Are you sure you want to delete this task?')) return;
       var token = localStorage.getItem('dailyflow_token');
@@ -157,7 +205,7 @@
       });
     };
 
-    window._hpUpdateTask = function(form, id) {
+    window._hpUpdateTask = function(form, id, taskInfo) {
       var token = localStorage.getItem('dailyflow_token');
       var payload = {};
       new FormData(form).forEach(function(v, k) { if (v !== '' && k !== 'project') payload[k] = v; });
@@ -167,6 +215,7 @@
         body: JSON.stringify(payload)
       }).then(function(res) {
         if (res.ok) {
+          if (taskInfo) window._hpTrackRecentTask({ id: id, title: payload.title || (taskInfo && taskInfo.title) || '', projectDocId: (taskInfo && taskInfo.projectDocId) || '', projectName: (taskInfo && taskInfo.projectName) || '' });
           document.body.dispatchEvent(new CustomEvent('open-edit', { bubbles: true, detail: null }));
           document.body.dispatchEvent(new CustomEvent('load-homepage', { bubbles: true }));
         } else {
@@ -182,6 +231,7 @@
     };
 
     window._hpEditTask = function(btn) {
+      window._hpTrackRecentTask({ id: btn.dataset.id, title: btn.dataset.title, projectDocId: btn.dataset.projectDocId || '', projectName: btn.dataset.projectName || '' });
       document.body.dispatchEvent(new CustomEvent('open-edit', { bubbles: true, detail: {
         id: btn.dataset.id,
         title: btn.dataset.title,
@@ -203,10 +253,20 @@
 
     document.addEventListener('htmx:afterRequest', function(e) {
       var path = e.detail.pathInfo?.requestPath || '';
+      var verb = (e.detail.requestConfig?.verb || '').toLowerCase();
       if (path.indexOf('/api/time-entries') !== -1 && e.detail.successful) {
         document.body.dispatchEvent(new CustomEvent('load-tasks', {bubbles: true}));
+        if (verb !== 'get') {
+          var card = e.detail.elt && e.detail.elt.closest && e.detail.elt.closest('.task-card');
+          if (card) {
+            window._hpTrackTaskCard(card);
+          } else if (window.Alpine) {
+            var taskInfo = null;
+            try { taskInfo = Alpine.$data(document.body).timeEntryTask; } catch(err) {}
+            if (taskInfo) window._hpTrackRecentTask(taskInfo);
+          }
+        }
       }
-      var verb = (e.detail.requestConfig?.verb || '').toLowerCase();
       if (/\/api\/tasks\/[^/]+$/.test(path) && (verb === 'put' || verb === 'delete') && e.detail.successful) {
         if (document.getElementById('hp-projects')) {
           document.body.dispatchEvent(new CustomEvent('load-homepage', {bubbles: true}));
@@ -268,6 +328,7 @@
       }
       if (target.id === 'homepage' || target.closest && target.closest('#homepage')) {
         window._applyPinStatesToHomepage();
+        window._renderRecentTasks();
       }
     });
 
@@ -730,7 +791,7 @@
         <!-- Add task modal -->
         <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
             <form class="task-edit" hx-post="/api/tasks/from-url" hx-swap="none"
-                @htmx:after-request="if ($event.detail.elt === $el && $event.detail.successful) { addModalOpen = false; $el.reset(); newTaskProjectName = ''; $dispatch('refresh-tasks'); $dispatch('refresh-projects') }">
+                @htmx:after-request="if ($event.detail.elt === $el && $event.detail.successful) { try { var _rd = JSON.parse($event.detail.xhr.responseText); var _t = _rd && (_rd.data || _rd); if (_t && _t.documentId) window._hpTrackRecentTask({ id: _t.documentId, title: _t.title || '', projectDocId: (selected && selected.id) || '', projectName: (selected && selected.name) || '' }); } catch(e) {} addModalOpen = false; $el.reset(); newTaskProjectName = ''; $dispatch('refresh-tasks'); $dispatch('refresh-projects') }">
                 <h3>New task</h3>
 
                 <label class="url-import__label">Import from URL (optional)</label>
@@ -778,7 +839,7 @@
                       :hx-target="'#task-' + editing.id"
                       hx-swap="outerHTML"
                       x-init="if (page !== 'home') htmx.process($el)"
-                      @submit="page === 'home' && ($event.preventDefault(), _hpUpdateTask($el, editing.id))"
+                      @submit="page === 'home' && ($event.preventDefault(), _hpUpdateTask($el, editing.id, editing))"
                       @htmx:after-request="editing = null">
                     <h3>Edit task</h3>
                     <input type="text" name="title" class="form-control" :value="editing.title" required />
