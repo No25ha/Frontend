@@ -310,8 +310,12 @@
                     this.page = 'team';
                     this.$nextTick(() => this.$dispatch('load-team'));
                 } else if (hash === 'tasks') {
-                    this.page = 'tasks';
-                    this.$nextTick(() => this.$dispatch('load-tasks'));
+                    if (this.selected) {
+                        this.page = 'tasks';
+                        this.$nextTick(() => this.$dispatch('load-tasks'));
+                    } else {
+                        location.hash = 'projects';
+                    }
                 } else {
                     this.page = 'home';
                     this.$nextTick(() => this.$dispatch('load-homepage'));
@@ -610,8 +614,8 @@
                 <div>
                     <header class="detail__head">
                         <div>
-                            <button type="button" class="btn-ghost" @click="selected = null; navigate('home')" style="margin-right:.5rem">← Back</button>
-                            <h2 class="detail__title" x-text="selected ? selected.name : 'All Tasks'"></h2>
+                            <button type="button" class="btn-ghost" @click="selected = null; navigate('projects')" style="margin-right:.5rem">← Back</button>
+                            <h2 class="detail__title" x-text="selected ? selected.name : ''"></h2>
                             <span class="badge" x-show="selected" x-text="(selected?.count || 0) + ' tasks'"></span>
                         </div>
                         <button type="button" class="btn-primary-sm" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">+ New Task</button>
