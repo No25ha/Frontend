@@ -136,6 +136,199 @@
       rows.forEach(function(r) { tbody.appendChild(r); });
     };
 
+    // ── Homepage Stopwatch ───────────────────────────────────────────────
+    (function(){
+      var SW_KEY = 'df_hp_sw';
+      var _iv = null;
+
+      function pad(n){return n<10?'0'+n:String(n);}
+      function fmtElapsed(ms){
+        if(ms<0)ms=0;
+        var h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000),s=Math.floor((ms%60000)/1000);
+        return pad(h)+':'+pad(m)+':'+pad(s);
+      }
+      function fmtDuration(ms){
+        var total=Math.round(ms/60000),h=Math.floor(total/60),m=total%60;
+        if(!h)return m+'m'; if(!m)return h+'h'; return h+'h '+m+'m';
+      }
+      function getState(){try{return JSON.parse(localStorage.getItem(SW_KEY)||'null');}catch(e){return null;}}
+      function setState(s){try{if(s)localStorage.setItem(SW_KEY,JSON.stringify(s));else localStorage.removeItem(SW_KEY);}catch(e){}}
+
+      function tick(){
+        var st=getState(),el=document.getElementById('hp-sw-elapsed');
+        if(!el||!st||!st.startedAt)return;
+        el.textContent=fmtElapsed(Date.now()-new Date(st.startedAt).getTime());
+      }
+      function setRunningUI(running){
+        var start=document.getElementById('hp-sw-start'),stop=document.getElementById('hp-sw-stop');
+        var label=document.getElementById('hp-sw-label'),sw=document.getElementById('hp-sw');
+        var hint=document.getElementById('hp-sw-hint'),badge=document.getElementById('hp-sw-badge');
+        if(!start||!stop)return;
+        start.style.display=running?'none':'';
+        stop.style.display=running?'':'none';
+        if(sw)sw.classList.toggle('hp-sw--running',running);
+        if(label)label.textContent=running?'Tracking…':'Ready to track';
+        if(hint)hint.textContent=running?'Timer is running — click Stop & Save when done':'Start the stopwatch and track your work time';
+        if(badge)badge.classList.toggle('hp-sw__badge--running',running);
+        if(!running){var el=document.getElementById('hp-sw-elapsed');if(el)el.textContent='00:00:00';}
+      }
+
+      window._hpSwStart=function(){
+        if(getState())return;
+        setState({startedAt:new Date().toISOString()});
+        setRunningUI(true);
+        clearInterval(_iv);_iv=setInterval(tick,1000);tick();
+      };
+      window._hpSwStop=function(){
+        var st=getState();if(!st)return;
+        clearInterval(_iv);_iv=null;
+        var stoppedAt=new Date().toISOString();
+        setState({startedAt:st.startedAt,stoppedAt:stoppedAt});
+        setRunningUI(false);
+        var ms=new Date(stoppedAt)-new Date(st.startedAt);
+        var info=document.getElementById('hp-sw-modal-info');
+        if(info)info.textContent='Tracked: '+fmtDuration(ms);
+        document.getElementById('hp-sw-modal-error').textContent='';
+        document.getElementById('hp-sw-project').value='';
+        var tinput=document.getElementById('hp-sw-task-input');
+        if(tinput){tinput.value='';tinput.disabled=true;}
+        document.getElementById('hp-sw-comment').value='';
+        window._hpSwLoadProjects();
+        document.getElementById('hp-sw-modal').style.display='flex';
+      };
+      window._hpSwCancelModal=function(){
+        document.getElementById('hp-sw-modal').style.display='none';
+        setState(null);
+      };
+      window._hpSwLoadProjects=function(){
+        var token=localStorage.getItem('dailyflow_token')||'';
+        var sel=document.getElementById('hp-sw-project');
+        if(!sel)return;
+        sel.innerHTML='<option value="">Loading…</option>';
+        fetch(window.API_BASE+'/api/projects?pagination[pageSize]=200&sort=name:asc',{
+          headers:{'Authorization':'Bearer '+token}
+        }).then(function(r){return r.json();}).then(function(d){
+          sel.innerHTML='<option value="">— Select project —</option>';
+          (d&&d.data||[]).forEach(function(p){
+            var o=document.createElement('option');
+            o.value=p.documentId||p.id;
+            o.textContent=p.name||(p.attributes&&p.attributes.name)||p.documentId;
+            sel.appendChild(o);
+          });
+        }).catch(function(){sel.innerHTML='<option value="">— Error loading —</option>';});
+      };
+      window._hpSwLoadTasks=function(projectDocId){
+        var tinput=document.getElementById('hp-sw-task-input');
+        if(!tinput)return;
+        if(!projectDocId){tinput.value='';tinput.disabled=true;return;}
+        tinput.value='';tinput.disabled=false;tinput.focus();
+      };
+      window._hpSwSave=function(){
+        var st=getState();
+        if(!st||!st.startedAt||!st.stoppedAt){document.getElementById('hp-sw-modal-error').textContent='No tracked time found.';return;}
+        var projSel=document.getElementById('hp-sw-project');
+        var projectDocId=projSel?projSel.value:'';
+        if(!projectDocId){document.getElementById('hp-sw-modal-error').textContent='Please select a project.';return;}
+        var taskTitle=((document.getElementById('hp-sw-task-input')||{}).value||'').trim();
+        if(!taskTitle){document.getElementById('hp-sw-modal-error').textContent='Please enter a task name.';return;}
+        var comment=(document.getElementById('hp-sw-comment').value||'').trim();
+        var token=localStorage.getItem('dailyflow_token')||'';
+        var btn=document.getElementById('hp-sw-save');
+        var projName=projSel.options[projSel.selectedIndex].text;
+        btn.disabled=true;btn.textContent='Creating task…';
+        // Step 1: create the task
+        fetch(window.API_BASE+'/api/tasks',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+          body:JSON.stringify({title:taskTitle,project:projectDocId,state:'completed'})
+        }).then(function(r){return r.ok?r.json():r.json().then(function(d){throw d;});})
+        .then(function(d){
+          var taskDocId=(d&&d.data&&(d.data.documentId||d.data.id))||'';
+          if(!taskDocId)throw {error:{message:'Task created but no ID returned.'}};
+          btn.textContent='Saving time…';
+          // Step 2: create the time entry
+          var payload={task:taskDocId,startedAt:st.startedAt,stoppedAt:st.stoppedAt};
+          if(comment)payload.comment=comment;
+          return fetch(window.API_BASE+'/api/time-entries',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+            body:JSON.stringify(payload)
+          }).then(function(r2){return r2.ok?{taskDocId:taskDocId}:r2.json().then(function(d2){throw d2;});});
+        }).then(function(res){
+          setState(null);
+          document.getElementById('hp-sw-modal').style.display='none';
+          btn.disabled=false;btn.textContent='Save';
+          if(window._hpTrackRecentTask)window._hpTrackRecentTask({id:res.taskDocId,title:taskTitle,projectDocId:projectDocId,projectName:projName});
+          document.body.dispatchEvent(new CustomEvent('load-homepage',{bubbles:true}));
+          window.dispatchEvent(new CustomEvent('show-toast',{detail:'Time entry saved!'}));
+        }).catch(function(err){
+          var msg=(err&&err.error&&err.error.message)||'Save failed.';
+          document.getElementById('hp-sw-modal-error').textContent=msg;
+          btn.disabled=false;btn.textContent='Save';
+        });
+      };
+      // Called after HTMX swaps the homepage HTML — restores timer state into the new DOM
+      window._hpSwRestore=function(){
+        clearInterval(_iv);_iv=null;
+        var st=getState();
+        if(!st||!st.startedAt)return;
+        if(st.stoppedAt){
+          var ms=new Date(st.stoppedAt)-new Date(st.startedAt);
+          var info=document.getElementById('hp-sw-modal-info');
+          if(info)info.textContent='Tracked: '+fmtDuration(ms);
+          var errEl=document.getElementById('hp-sw-modal-error');if(errEl)errEl.textContent='';
+          var projSel=document.getElementById('hp-sw-project');if(projSel)projSel.value='';
+          var tinput=document.getElementById('hp-sw-task-input');
+          if(tinput){tinput.value='';tinput.disabled=true;}
+          var comm=document.getElementById('hp-sw-comment');if(comm)comm.value='';
+          window._hpSwLoadProjects();
+          var modal=document.getElementById('hp-sw-modal');if(modal)modal.style.display='flex';
+        }else{
+          setRunningUI(true);
+          _iv=setInterval(tick,1000);tick();
+        }
+      };
+    })();
+
+    // ── Collapsible project groups ─────────────────────────────────────────
+    var _HP_COLLAPSED_KEY = 'df_hp_collapsed';
+    function _hpGetCollapsed() {
+      try { return new Set(JSON.parse(localStorage.getItem(_HP_COLLAPSED_KEY) || '[]')); }
+      catch(e) { return new Set(); }
+    }
+    function _hpSaveCollapsed(s) {
+      try { localStorage.setItem(_HP_COLLAPSED_KEY, JSON.stringify([...s])); } catch(e) {}
+    }
+    window._hpToggleProject = function(docId, btn) {
+      var wrap = document.querySelector('.hp-tasks-table-wrap[data-proj-id="' + docId + '"]');
+      if (!wrap) return;
+      var collapsed = _hpGetCollapsed();
+      if (wrap.classList.contains('hp-proj-collapsed')) {
+        wrap.classList.remove('hp-proj-collapsed');
+        btn.classList.remove('hp-proj-toggle--collapsed');
+        collapsed.delete(docId);
+      } else {
+        wrap.classList.add('hp-proj-collapsed');
+        btn.classList.add('hp-proj-toggle--collapsed');
+        collapsed.add(docId);
+      }
+      _hpSaveCollapsed(collapsed);
+    };
+    window._hpRestoreCollapsed = function() {
+      var collapsed = _hpGetCollapsed();
+      collapsed.forEach(function(docId) {
+        var wrap = document.querySelector('.hp-tasks-table-wrap[data-proj-id="' + docId + '"]');
+        if (!wrap) return;
+        wrap.classList.add('hp-proj-collapsed');
+        var section = wrap.closest('.hp-project-group');
+        if (section) {
+          var btn = section.querySelector('.hp-proj-toggle');
+          if (btn) btn.classList.add('hp-proj-toggle--collapsed');
+        }
+      });
+    };
+    // ──────────────────────────────────────────────────────────────────────
+
     var _RECENT_KEY = 'df_recent_tasks';
     var _RECENT_MAX = 8;
 
@@ -148,14 +341,31 @@
       if (!body) return;
       var list = window._getRecentTasks();
       if (!list.length) {
-        body.innerHTML = '<p class="hp-person__empty">No recent tasks yet</p>';
+        body.innerHTML = '<p class="hp-recent-empty">No recent tasks yet</p>';
         return;
       }
       var html = '<ul class="hp-recent-list">';
-      list.forEach(function(t) {
-        html += '<li class="hp-recent-item" onclick="window._hpTrackRecentTask(' + JSON.stringify(t).replace(/"/g, '&quot;') + ');window._openProject(\'' + (t.projectDocId||'').replace(/'/g,"\\'") + '\',\'' + (t.projectName||'').replace(/'/g,"\\'") + '\',0)">'
-          + '<span class="hp-recent-item__title">' + (t.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>'
-          + '<span class="hp-recent-item__project">' + (t.projectName || '').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>'
+      list.forEach(function(t, i) {
+        var timeStr = '';
+        if (t.lastTime) {
+          var d = new Date(t.lastTime);
+          if (!isNaN(d)) timeStr = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', hour12:false});
+        }
+        var proj = (t.projectName||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        var title = (t.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        var initial = (t.title||'?')[0].toUpperCase();
+        var colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444','#14b8a6'];
+        var color = colors[i % colors.length];
+        html += '<li class="hp-recent-item" onclick="window._hpTrackRecentTask(' + JSON.stringify(t).replace(/"/g,'&quot;') + ');window._openProject(\'' + (t.projectDocId||'').replace(/'/g,"\\'") + '\',\'' + (t.projectName||'').replace(/'/g,"\\'") + '\',0)">'
+          + '<div class="hp-recent-item__avatar" style="background:' + color + '">' + initial + '</div>'
+          + '<div class="hp-recent-item__body">'
+          +   '<span class="hp-recent-item__title">' + title + '</span>'
+          +   '<span class="hp-recent-item__meta">'
+          +     (proj ? '<span class="hp-recent-item__project">' + proj + '</span>' : '')
+          +     (timeStr ? '<span class="hp-recent-item__time">' + timeStr + '</span>' : '')
+          +   '</span>'
+          + '</div>'
+          + '<span class="hp-recent-item__arrow">›</span>'
           + '</li>';
       });
       html += '</ul>';
@@ -166,7 +376,7 @@
       if (!task || !task.id) return;
       try {
         var list = window._getRecentTasks().filter(function(t) { return t.id !== task.id; });
-        list.unshift({ id: task.id, title: task.title, projectDocId: task.projectDocId, projectName: task.projectName });
+        list.unshift({ id: task.id, title: task.title, projectDocId: task.projectDocId, projectName: task.projectName, lastTime: new Date().toISOString() });
         if (list.length > _RECENT_MAX) list = list.slice(0, _RECENT_MAX);
         localStorage.setItem(_RECENT_KEY, JSON.stringify(list));
         window.dispatchEvent(new CustomEvent('recent-tasks-updated'));
@@ -329,6 +539,8 @@
       if (target.id === 'homepage' || target.closest && target.closest('#homepage')) {
         window._applyPinStatesToHomepage();
         window._renderRecentTasks();
+        if (window._hpSwRestore) window._hpSwRestore();
+        if (window._hpRestoreCollapsed) window._hpRestoreCollapsed();
       }
     });
 
